@@ -32,27 +32,24 @@ def get_glove_vector(word):
 
 
 def get_sentence_matrix(words):
-    """make (n, k) representaion of sentence
+    """make (n, k) representaion of sentence for Conv2d
     """
     _sent_matrix = [get_glove_vector(word).view(1, 1, 1, -1) for word in words]
     _sent_matrix = torch.cat(_sent_matrix, dim=2)
     return _sent_matrix
 
 
-def train(train_data_idx):
-    model = cnn.CNNTextClassifier(1, 2, WORD_EMBED_DIM, 0.5)
+def train(train_data_idx, drop_out, epoch_size):
+    model = cnn.CNNTextClassifier(1, 2, WORD_EMBED_DIM, drop_out)
     optimizer = optim.SGD(model.parameters(), lr=0.001)
     loss_function = nn.NLLLoss()
 
-    for epoch in range(30):
+    for epoch in range(epoch_size):
         total_loss = 0
         for i in train_data_idx:
             model.zero_grad()
             optimizer.zero_grad()
 
-            # input (mini_batch, in_channel, ix)
-            #_input = [get_glove_vector(word).view(1, 1, 1, -1) for word in train_data[i][0]]
-            #_input = torch.cat(_input, dim=2)
             s_m = get_sentence_matrix(train_data[i][0])
 
             tag_score = model(s_m)
@@ -60,15 +57,11 @@ def train(train_data_idx):
                     torch.LongTensor([0]) if train_data[i][1][0] == 1
                     else torch.LongTensor([1]))
 
-            #print(tag_score, target)
-
             loss = loss_function(tag_score, target)
             loss.backward()
             optimizer.step()
 
             total_loss += loss.data
-            #if i%10 == 0:
-            #    print("\t%d loss: %.3f" % (i, loss.data))
         print("\t epoch %d\ttotal loss: %.3f" % (epoch, total_loss))
 
     return model
@@ -82,28 +75,40 @@ def test(model, test_data_idx):
         s_m = get_sentence_matrix(sentence)
         result = model(s_m).view(-1, 1)
         answer = autograd.Variable(torch.LongTensor(target))
-        #print(result, answer)
 
         v, ret_idx = torch.max(result, 0)
         v, ans_idx = torch.max(answer, 0)
-        #print(ret_idx, ans_idx)
+
         if ret_idx.equal(ans_idx):
             answer_cnt += 1
 
     print("\t accuracy: %.3f" % (answer_cnt/total_size*100))
 
+
 # train_data[0] = list(sentence)
 # train_data[1] = list([1, 0])
 train_data = preprocessing.get_train_data()
 train_data = [[sent, lable] for sent, lable in zip(train_data[0], train_data[1])]
-#print(train_data[:3])
+
 shuffle(train_data)
 
 kf = KFold(n_splits=10)
 kf.get_n_splits(train_data)
 
+# hyperparameter test
+drop_out, epoch_size = 0.2, 30
+print("--------------------------------------------")
+print("drop_out: %.1f    epoch_size: %d" % (drop_out, epoch_size))
 for train_index, test_index in kf.split(train_data):
     print("TRAIN:", train_index, "TEST:", test_index)
-    model = train(train_index)
+    model = train(train_index, drop_out, epoch_size)
+    test(model, test_index)
+
+drop_out, epoch_size = 0.5, 30
+print("--------------------------------------------")
+print("drop_out: %.1f    epoch_size: %d" % (drop_out, epoch_size))
+for train_index, test_index in kf.split(train_data):
+    print("TRAIN:", train_index, "TEST:", test_index)
+    model = train(train_index, drop_out, epoch_size)
     test(model, test_index)
 
