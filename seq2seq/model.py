@@ -13,18 +13,17 @@ class Encoder(nn.Module):
         self.embedding_dim = embedding_dim
 
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+        self.gru = nn.GRU(embedding_dim, hidden_dim)
         self.hidden = self.init_hidden()
 
     def forward(self, inputs, hidden):
         embedded = self.embedding(inputs).view(-1, 1, self.embedding_dim)
         output = embedded
-        output, self.hidden = self.lstm(output, self.hidden)
+        output, self.hidden = self.gru(output, self.hidden)
         return output, self.hidden
 
     def init_hidden(self):
-        return (torch.zeros(1, 1, self.hidden_dim, device=device),
-                torch.zeros(1, 1, self.hidden_dim, device=device))
+        return torch.zeros(1, 1, self.hidden_dim, device=device)
 
 
 class Decoder(nn.Module):
@@ -36,7 +35,7 @@ class Decoder(nn.Module):
 
         # out language vocab size
         self.embedding = nn.Embedding(out_vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+        self.gru = nn.GRU(embedding_dim, hidden_dim)
         self.out = nn.Linear(hidden_dim, out_vocab_size)
         self.hidden = self.init_hidden()
         self.softmax = nn.LogSoftmax(dim=1)
@@ -44,10 +43,9 @@ class Decoder(nn.Module):
     def forward(self, inputs, hidden):
         output = self.embedding(inputs).view(-1, 1, self.embedding_dim)
         output = F.relu(output)
-        output, self.hidden = self.lstm(output, self.hidden)
+        output, self.hidden = self.gru(output, self.hidden)
         output = self.softmax(self.out(output[0]))
         return output, self.hidden
 
     def init_hidden(self):
-        return (torch.zeros(1, 1, self.hidden_dim, device=device),
-                torch.zeros(1, 1, self.hidden_dim, device=device))
+        return torch.zeros(1, 1, self.hidden_dim, device=device)

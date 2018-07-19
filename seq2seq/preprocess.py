@@ -7,8 +7,8 @@ class Vocab:
     def __init__(self):
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "<SOS>", 1: "<EOS>"}
-        self.n_words = 2
+        self.index2word = {0: "<SOS>", 1: "<EOS>", 2: "<UNK>"}
+        self.n_words = 3
 
     def addSentence(self, sentence):
         for l in sentence.split('\t'):
@@ -43,7 +43,8 @@ def read_train_data(path):
 
 
 def indexesFromSentence(vocab, sentence):
-    return [vocab.word2index[word] for word in sentence.split(' ')]
+    return [vocab.word2index[word] if word in vocab.word2index else UNK_token \
+            for word in sentence.split(' ')]
 
 
 def tensorFromSentence(vocab, sentence):
@@ -56,4 +57,23 @@ def tensorsFromPair(vocab, pair):
     input_tensor = tensorFromSentence(vocab, pair[0])
     target_tensor = tensorFromSentence(vocab, pair[1])
     return (input_tensor, target_tensor)
+
+
+def prepare_evaluate():
+    train_data = {}
+    test_data = {}
+    test_answer = {}
+
+    lines = open('data/train_list.txt', 'r').read().strip().split('\n')
+    for l in lines:
+        q, num = l.split('\t')
+        train_data[num] = q
+
+    lines = open('data/test_list.txt', 'r').read().strip().split('\n')
+    for l in lines:
+        q, num, answer = l.split('\t')
+        test_data[num] = q
+        test_answer[num] = answer
+
+    return train_data, test_data, test_answer
 

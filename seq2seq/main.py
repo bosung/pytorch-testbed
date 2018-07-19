@@ -1,7 +1,8 @@
 from model import Encoder, Decoder
 from preprocess import Vocab
-from utils import asMinutes, timeSince
+from utils import asMinutes, timeSince, cosine_similarity, get_top_n
 import preprocess as prep
+import evaluate as ev
 
 import time
 import torch
@@ -25,12 +26,16 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 
     loss = 0
 
-    for ei in range(input_length):
+    for ei in range(min(input_length, max_length)):
         encoder_output, encoder_hidden = encoder(input_tensor[ei], encoder_hidden)
         encoder_outputs[ei] = encoder_output[0, 0]
 
     decoder_input = torch.tensor([[SOS_token]], device=device)
     decoder_hidden = encoder_hidden
+
+    #print(input_length)
+    #print(encoder_hidden)
+    #print(encoder_hidden.size())
 
     for di in range(target_length):
         decoder_output, decoder_hidden = decoder(
@@ -66,16 +71,23 @@ def trainIters(encoder, decoder, n_iters, pairs, vocab,
             input_tensor = pair[0]
             target_tensor = pair[1]
 
+            #print(input_tensor.view(1,-1))
+            #print(target_tensor.view(1, -1))
+
             loss = train(input_tensor, target_tensor, encoder,
                      decoder, encoder_optimizer, decoder_optimizer, criterion)
             print_loss_total += loss
             plot_loss_total += loss
+
 
         if iter % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
             print('%s (%d %d%%) %.4f' % (timeSince(start, iter / n_iters),
                                          iter, iter / n_iters * 100, print_loss_avg))
+
+        #if iter % 5 == 0:
+        #    ev.evaluate(encoder, vocab)
 
 
 def evaluate(encoder, decoder, sentence, vocab, max_length=MAX_LENGTH):
@@ -86,7 +98,7 @@ def evaluate(encoder, decoder, sentence, vocab, max_length=MAX_LENGTH):
 
         encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
 
-        for ei in range(input_length):
+        for ei in range(min(max_length, input_length)):
             encoder_output, encoder_hidden = encoder(input_tensor[ei], encoder_hidden)
             encoder_outputs[ei] += encoder_output[0, 0]
 
@@ -113,27 +125,37 @@ def evaluate(encoder, decoder, sentence, vocab, max_length=MAX_LENGTH):
         #return decoded_words, decoder_attentions[:di + 1]
         return decoded_words
 
+def pretty_printer(data):
+    return [x.split("/")[0] for x in data]
 
-def evaluateRandomly(encoder, decoder, pairs, vocab, n=10):
+def pretty_printer2(data):
+    return ' '.join([x.split("/")[0] for x in data.split(" ")])
+
+def evaluateRandomly(encoder, decoder, pairs, vocab, n=5):
     for i in range(n):
         pair = random.choice(pairs)
-        print('>', pair[0])
-        print('=', pair[1])
+        print('>', pretty_printer2(pair[0]))
+        print('=', pretty_printer2(pair[1]))
         output_words = evaluate(encoder, decoder, pair[0], vocab)
-        output_sentence = ' '.join(output_words)
+        output_sentence = ' '.join(pretty_printer(output_words))
         print('<', output_sentence)
         print('')
 
-train_file = 'data/cqa_train_temp.txt'
 
-vocab = Vocab()
-vocab.build(train_file)
+if __name__=="__main__":
+    train_file = 'data/cqa_train_temp.txt'
 
-train_data = prep.read_train_data(train_file)
+    vocab = Vocab()
+    vocab.build(train_file)
 
-encoder = Encoder(vocab.n_words, 16, 32).to(device)
-decoder = Decoder(vocab.n_words, 16, 32).to(device)
+    train_data = prep.read_train_data(train_file)
 
-trainIters(encoder, decoder, 200, train_data, vocab, print_every=10, learning_rate=0.01)
+    encoder = Encoder(vocab.n_words, 16, 32).to(device)
+    decoder = Decoder(vocab.n_words, 16, 32).to(device)
 
-evaluateRandomly(encoder, decoder, train_data, vocab)
+    trainIters(encoder, decoder, 100, train_data, vocab, print_every=5, learning_rate=0.01)
+
+    evaluateRandomly(encoder, decoder, train_data, vocab)
+
+    #evaluate(encoder, vocab)
+
