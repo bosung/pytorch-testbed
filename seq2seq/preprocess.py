@@ -7,7 +7,7 @@ class Vocab:
     def __init__(self):
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "<SOS>", 1: "<EOS>", 2: "<UNK>"}
+        self.index2word = {0: "<SOS>", 1: "</s>", 2: "<UNK>"}
         self.n_words = 3
 
     def addSentence(self, sentence):
@@ -33,6 +33,34 @@ class Vocab:
 
         print("[INFO] total %s words" % self.n_words)
 
+    def load_weight(self, path="data/bobae_embedding.txt"):
+        print("Loading pre-trained embeddings from %s ..." % path)
+        pretrained_embedding = self._load_pretrained_embedding(path)
+
+        weight = torch.tensor([]).to(device)
+        for i in self.index2word.keys():
+            word = self.index2word[i]
+            if word in pretrained_embedding:
+                vector = torch.tensor(pretrained_embedding[word])
+                weight = torch.cat((weight, vector), 0)
+            else:
+                vector = torch.randn((1, 64), dtype=torch.float).to(device)
+                weight = torch.cat((weight, vector), 0)
+        return torch.tensor(weight).view(-1, 64)
+
+    def _load_pretrained_embedding(self, path):
+        print("Loading embedding from %s ..." % path)
+
+        embedding = {}
+        lines = open(path, encoding='utf-8').read().strip().split('\n')
+        total_num, dim = lines[0].strip().split(" ")
+        for line in lines[1:]:
+            toks = line.strip().split(" ")
+            word = toks[0]
+            vector = [float(e) for e in toks[1:]]
+            embedding[word] = torch.tensor(vector, device=device).view(1, -1)
+        return embedding
+
 
 def read_train_data(path):
     #path = 'data/cqa_train.txt'
@@ -44,7 +72,7 @@ def read_train_data(path):
 
 def indexesFromSentence(vocab, sentence):
     return [vocab.word2index[word] if word in vocab.word2index else UNK_token \
-            for word in sentence.split(' ')]
+            for word in sentence.split(' ')][:MAX_LENGTH-1]
 
 
 def tensorFromSentence(vocab, sentence):
@@ -52,28 +80,21 @@ def tensorFromSentence(vocab, sentence):
     indexes.append(EOS_token)
     return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
 
+def tensorFromSentenceBatchWithPadding(vocab, sentence_list):
+    indexes = []
+    for sentence in sentence_list:
+        index = indexesFromSentence(vocab, sentence)
+        index.append(EOS_token)
+
+        count = MAX_LENGTH - len(index)
+        for _ in range(count):
+            index.append(0)
+
+        indexes += index
+    return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, MAX_LENGTH)
 
 def tensorsFromPair(vocab, pair):
     input_tensor = tensorFromSentence(vocab, pair[0])
     target_tensor = tensorFromSentence(vocab, pair[1])
     return (input_tensor, target_tensor)
-
-
-def prepare_evaluate():
-    train_data = {}
-    test_data = {}
-    test_answer = {}
-
-    lines = open('data/train_list.txt', 'r').read().strip().split('\n')
-    for l in lines:
-        q, num = l.split('\t')
-        train_data[num] = q
-
-    lines = open('data/test_list.txt', 'r').read().strip().split('\n')
-    for l in lines:
-        q, num, answer = l.split('\t')
-        test_data[num] = q
-        test_answer[num] = answer
-
-    return train_data, test_data, test_answer
 
