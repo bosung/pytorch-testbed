@@ -1,4 +1,4 @@
-from model import Encoder, Decoder
+from model import Encoder, Decoder, AttentionDecoder
 from preprocess import Vocab
 from utils import asMinutes, timeSince, cosine_similarity, get_top_n
 import preprocess as prep
@@ -23,26 +23,21 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
-    #input_length = input_tensor.size(0)
-    #target_length = target_tensor.size(0)
-
-    encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
+    #encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
 
     loss = 0
 
-    input_tensor = input_tensor.transpose(0, 1)
+    #input_tensor = input_tensor.transpose(0, 1)
     target_tensor = target_tensor.transpose(0, 1)
 
-    encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
+    encoder_outputs, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
     decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)
     decoder_hidden = encoder_hidden
 
-    #print("decoder input", decoder_input.size())
-    #print("decoder input", decoder_input)
-
     for di in range(max_length):
-        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+        decoder_output, decoder_hidden, decoder_attention = decoder(
+                decoder_input, decoder_hidden, encoder_outputs)
 
         loss += criterion(decoder_output, target_tensor[di])
         decoder_input = target_tensor[di]  # Teacher forcing
@@ -62,10 +57,10 @@ def trainIters(epoch, encoder, decoder, n_iters, pairs, vocab, train_loader,
     print_loss_total = 0  # Reset every print_every
     plot_loss_total = 0  # Reset every plot_every
 
-    #encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    #decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
-    encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
+    #encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
+    #decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
 
     criterion = nn.NLLLoss()
 
@@ -94,7 +89,7 @@ def evaluate(encoder, decoder, sentence, vocab, max_length=MAX_LENGTH):
 
         encoder_hidden = encoder.init_hidden(max_length)
 
-        encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
+        #encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
 
         input_tensor = input_tensor.transpose(0, 1)
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
@@ -108,7 +103,8 @@ def evaluate(encoder, decoder, sentence, vocab, max_length=MAX_LENGTH):
 
         #print(decoder_input)
         for di in range(max_length):
-            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            decoder_output, decoder_hidden, decoder_attention = decoder(
+                    decoder_input, decoder_hidden, encoder_output)
             topv, topi = decoder_output.data.topk(1)
             decoder_input = topi.squeeze().view(1, batch_size)
 
@@ -133,13 +129,9 @@ def pretty_printer2(data):
     return ' '.join([x.split("/")[0] for x in data.split(" ")][:MAX_LENGTH])
 
 def evaluateRandomly(encoder, decoder, pairs, vocab, batch_size, n=10):
-    #for i in range(n):
     test = [p[0] for p in pairs][:batch_size]
     answer = [p[1] for p in pairs][:batch_size]
     result_batch = evaluate(encoder, decoder, test, vocab)
-
-    #for e in result_batch:
-    #    print(len(e))
 
     for i, out in enumerate(result_batch):
     #for pair in pairs:
@@ -155,14 +147,18 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--encoder', help='load exisited model')
     parser.add_argument('--decoder', help='load exisited model')
-    parser.add_argument('--batch_size', default=10)
+    parser.add_argument('--batch_size', default=20)
     args = parser.parse_args()
 
     train_file = 'data/cqa_train.txt'
 
     vocab = Vocab()
     vocab.build(train_file)
-    weight = vocab.load_weight()
+    if args.encoder:
+        weight = empty_weight
+    else:
+        # load pre-trained embedding
+        weight = vocab.load_weight()
 
     global batch_size
     batch_size = args.batch_size
@@ -171,7 +167,7 @@ if __name__=="__main__":
     train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
     encoder = Encoder(vocab.n_words, 64, 32, batch_size, weight).to(device)
-    decoder = Decoder(vocab.n_words, 64, 32, batch_size).to(device)
+    decoder = AttentionDecoder(vocab.n_words, 64, 32, batch_size).to(device)
 
     if args.encoder:
         encoder.load_state_dict(torch.load(args.encoder))
@@ -180,14 +176,25 @@ if __name__=="__main__":
 
     #ev.evaluate(encoder, vocab, batch_size)
 
-    total_epoch = 600
+    # max accuracy
+    max_a_at_5 = 0
+    max_a_at_1 = 0
+
+    total_epoch = 400
+
     for epoch in range(1, total_epoch+1):
         random.shuffle(train_data)
-        trainIters(epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=10, learning_rate=0.005)
+        trainIters(epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=5, learning_rate=0.01)
 
         if epoch % 20 == 0:
-            torch.save(encoder.state_dict(), 'encoder.model')
-            torch.save(decoder.state_dict(), 'decoder.model')
-            evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
-            ev.evaluate(encoder, vocab, batch_size)
+            a_at_5, a_at_1 = ev.evaluate(encoder, vocab, batch_size)
+            #evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
+
+            if a_at_1 > max_a_at_1:
+                max_a_at_1 = a_at_1
+                print("New record! accuracy@1: %.4f" % a_at_1)
+                torch.save(encoder.state_dict(), 'encoder.model')
+                torch.save(decoder.state_dict(), 'decoder.model')
+                evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
+
 

@@ -7,3 +7,6 @@ EOS_token = 1
 UNK_token = 2
 
 MAX_LENGTH = 15
+
+empty_weight = torch.tensor([])
+

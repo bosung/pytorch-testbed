@@ -87,18 +87,22 @@ def evaluate(encoder, vocab, batch_size):
             t = train_embed[candi].view(encoder.hidden_dim)
             e = embedded.view(encoder.hidden_dim)
             temp[candi] = cosine_similarity(t, e)
-            #print("[INFO] test: %s train: %s" % (tk, candi))
 
         top_n = get_top_n(temp, 5)
         for e in top_n.keys():
             if isAnswer(e, test_answer[tk]):
+                #print("top5 ", tk, e, top_n[e])
                 answer5 += 1
                 break
 
-        #top_n = get_top_n(temp, 1)
-        #for e in top_n.keys():
         top1 = list(top_n.keys())[0]
         if isAnswer(top1, test_answer[tk]):
+            #print("top1 ", tk, top1)
             answer1 += 1
 
-    print("total: %d, accuracy@5: %.4f, accuracy@1: %.4f" % (total, answer5/total*100, answer1/total*100))
+    accuracy_at_5 = answer5/total*100
+    accuracy_at_1 = answer1/total*100
+
+    print("total: %d, accuracy@5: %.4f, accuracy@1: %.4f" % (total, accuracy_at_5, accuracy_at_1))
+
+    return accuracy_at_5, accuracy_at_1
