@@ -3,6 +3,8 @@ import math
 
 import torch
 
+from const import *
+
 
 def asMinutes(s):
     m = math.floor(s / 60)
@@ -32,4 +34,12 @@ def get_top_n(data, n):
         if num == n:
             break
     return sorted_dict
+
+
+def pretty_printer(data):
+    return [x.split("/")[0] for x in data]
+
+
+def pretty_printer2(data):
+    return ' '.join([x.split("/")[0] for x in data.split(" ")][:MAX_LENGTH])
 
