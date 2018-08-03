@@ -37,15 +37,24 @@ class Vocab:
         print("Loading pre-trained embeddings from %s ..." % path)
         pretrained_embedding = self._load_pretrained_embedding(path)
 
+        include = 0
+        exclude = 0
+        ex_list = []
         weight = torch.tensor([]).to(device)
         for i in self.index2word.keys():
             word = self.index2word[i]
             if word in pretrained_embedding:
                 vector = torch.tensor(pretrained_embedding[word])
                 weight = torch.cat((weight, vector), 0)
+                include += 1
             else:
-                vector = torch.randn((1, 64), dtype=torch.float).to(device)
+                #vector = torch.randn((1, 64), dtype=torch.float).to(device)
+                vector = torch.zeros((1, 64), dtype=torch.float).to(device)
                 weight = torch.cat((weight, vector), 0)
+                exclude += 1
+                ex_list.append(word)
+        print(include, exclude)
+        print(ex_list)
         return torch.tensor(weight).view(-1, 64)
 
     def _load_pretrained_embedding(self, path):

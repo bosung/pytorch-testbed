@@ -74,7 +74,7 @@ def evaluate():
 
         top_n = get_top_n(temp, 5)
         for e in top_n.keys():
-            print("%.4f %4s %s" % (top_n[e], e, pretty_printer2(train_data[e])))
+            print("%.8f %4s %s" % (top_n[e], e, pretty_printer2(train_data[e])))
             if ev.isAnswer(e, test_answer[tk]):
                 answer5 += 1
                 break

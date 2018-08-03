@@ -1,6 +1,5 @@
 from model import Encoder, Decoder
 from preprocess import Vocab
-#from utils import asMinutes, timeSince, cosine_similarity, get_top_n
 import preprocess as prep
 import evaluate as ev
 
@@ -57,12 +56,11 @@ def trainIters(epoch, encoder, decoder, n_iters, pairs, vocab, train_loader,
     print_loss_total = 0  # Reset every print_every
     plot_loss_total = 0  # Reset every plot_every
 
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
-    #if n_iters > 500:
-    #    learning_rate = 0.05
-    #if n_iters > 800:
-    #    learning_rate = 0.01
+    encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
+
+    #encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    #decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
 
     #encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
     #decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
@@ -91,9 +89,12 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--encoder', help='load exisited model')
     parser.add_argument('--decoder', help='load exisited model')
+    parser.add_argument('--optim', default='RMSprop')
     parser.add_argument('--batch_size', default=40)
     parser.add_argument('--hidden_size', default=64)
     parser.add_argument('--w_embed_size', default=64)
+    parser.add_argument('--lr', default=0.001)
+    parser.add_argument('--epoch', default=400)
     args = parser.parse_args()
 
     train_file = 'data/cqa_train_komoran.txt'
@@ -104,7 +105,7 @@ if __name__=="__main__":
         weight = empty_weight
     else:
         # load pre-trained embedding
-        weight = vocab.load_weight(path="data/hd_embedding.txt")
+        weight = vocab.load_weight(path="data/komoran_hd_2times.vec")
 
     global batch_size
     batch_size = args.batch_size
@@ -128,8 +129,8 @@ if __name__=="__main__":
     # initialize
     max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size)
 
-    total_epoch = 400
-
+    total_epoch = args.epoch
+    print(args)
     for epoch in range(1, total_epoch+1):
         random.shuffle(train_data)
         trainIters(epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=2, learning_rate=0.001)
@@ -139,14 +140,17 @@ if __name__=="__main__":
 
             if a_at_1 > max_a_at_1:
                 max_a_at_1 = a_at_1
-                print("New record! accuracy@1: %.4f" % a_at_1)
+                print("[INFO] New record! accuracy@1: %.4f" % a_at_1)
                 torch.save(encoder.state_dict(), 'encoder-max.model')
                 torch.save(decoder.state_dict(), 'decoder-max.model')
-                ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
+                print("[INFO] new model saved")
 
             if a_at_5 > max_a_at_5:
                 max_a_at_5 = a_at_5
-                print("New record! accuracy@5: %.4f" % a_at_5)
+                print("[INFO] New record! accuracy@5: %.4f" % a_at_5)
+
+            ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
+
     print("Done! max accuracy@5: %.4f, max accuracy@1: %.4f" % (max_a_at_5, max_a_at_1))
     torch.save(encoder.state_dict(), 'encoder-last.model')
     torch.save(decoder.state_dict(), 'decoder-last.model')
