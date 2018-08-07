@@ -33,24 +33,25 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, out_vocab_size, embedding_dim, hidden_dim, batch_size):
+    def __init__(self, out_vocab_size, embedding_dim, hidden_dim, batch_size, weight):
         super(Decoder, self).__init__()
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
         self.batch_size = batch_size
 
-        # out language vocab size
-        self.embedding = nn.Embedding(out_vocab_size, embedding_dim)
+        if weight.nelement() == 0:
+            self.embedding = nn.Embedding(out_vocab_size, embedding_dim)
+        else:
+            self.embedding = nn.Embedding.from_pretrained(weight, freeze=False)
+
         self.gru = nn.GRU(embedding_dim, hidden_dim)
         self.out = nn.Linear(hidden_dim, out_vocab_size)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, inputs, hidden):
         output = self.embedding(inputs).view(1, -1, self.embedding_dim)
-        #print("decoder input: ", output.size())
         output = F.relu(output)
-        output, self.hidden = self.gru(output, hidden)
-        #print("decoder output 1: ", output.size())
+        output, hidden = self.gru(output, hidden)
         output = self.softmax(self.out(output[0]))
         return output, hidden
 

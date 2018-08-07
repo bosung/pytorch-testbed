@@ -3,8 +3,12 @@ from const import *
 #from utils import cosine_similarity
 from utils import *
 
+import torch
+import torch.nn as nn
+
 from nltk.translate.bleu_score import sentence_bleu
 
+softmax = nn.Softmax(dim=0)
 
 def prepare_evaluate():
     train_data = {}
@@ -37,37 +41,130 @@ def get_embed(encoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
 
         encoder_hidden = encoder.init_hidden(max_length)
 
-        # need for attention. not now
-        # encoder_outputs = torch.zeros(max_length, 1, encoder.hidden_dim, device=device)
-
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
         # encoder_hidden -> sentence embedding
         return encoder_hidden[0][0].view(1, 1, -1)
 
 
-def isAnswer(answer, predict):
-    if answer == predict:
-        return True
-    elif ((answer == 51 or answer == 308) and (predict == 51 or predict == 308)): return True
-    elif ((answer == 229 or answer == 46) and (predict == 229 or predict == 46)): return True
-    elif ((answer == 271 or answer == 47) and (predict == 271 or predict == 47)): return True
-    elif ((answer == 24 or answer == 200) and (predict == 24 or predict == 200)): return True
-    elif ((answer == 25 or answer == 201) and (predict == 25 or predict == 201)): return True
-    elif ((answer == 274 or answer == 225) and (predict == 274 or predict == 225)): return True
-    elif ((answer == 20 or answer == 175) and (predict == 20 or predict == 175)): return True
-    elif ((answer == 56 or answer == 350) and (predict == 56 or predict == 350)): return True
-    elif ((answer == 13 or answer == 100) and (predict == 13 or predict == 100)): return True
-    elif ((answer == 404 or answer == 405) and (predict == 404 or predict == 405)): return True
-    elif ((answer == 61 or answer == 367) and (predict == 61 or predict == 367)): return True
-    elif ((answer == 17 or answer == 148) and (predict == 17 or predict == 148)): return True
-    elif ((answer == 533 or answer == 554) and (predict == 533 or predict == 554)): return True
-    elif ((answer == 14 or answer == 124) and (predict == 14 or predict == 124)): return True
-    elif ((answer == 444 or answer == 529 or answer == 531) and (predict == 444 or predict == 529 or predict == 531)): return True
-    else: return False
+def get_embed_concat(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+    """ sentence embedding test
+        v1. concat two hidden vector of encoder and decoder
+    """
+    with torch.no_grad():
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
+
+        # because of batch, need expansion for input tensor
+        temp = input_tensor
+        for _ in range(batch_size-1):
+            temp = torch.cat((temp, input_tensor), 0)
+        input_tensor = temp
+
+        encoder_hidden = encoder.init_hidden(max_length)
+
+        encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
+
+        decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)  # SOS
+        decoder_hidden = encoder_hidden
+
+        decoded_words_batch = []
+        for _ in range(batch_size):
+            decoded_words_batch.append([])
+
+        #print(decoder_input)
+        for di in range(max_length):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            #print(decoder_hidden.squeeze()[0][:7])
+            topv, topi = decoder_output.data.topk(1)
+            decoder_input = topi.squeeze().view(1, batch_size)
+
+            #print(decoder_input)
+            #print(decoder_output.size())
+            for i, out in enumerate(decoder_output):
+                top = out.data.topk(1)[1]
+                #print(top.item())
+                if top.item() == EOS_token:
+                    decoded_words_batch[i].append('<EOS>')
+                else:
+                    decoded_words_batch[i].append(vocab.index2word[top.item()])
+
+        # concat two hidden vector of encoder, decoder
+        C_Q = encoder_hidden[0][0].view(1, -1)
+        C_A = decoder_hidden[0][0].view(1, -1)
+        return torch.cat((C_Q, C_A), 0)
 
 
-def evaluate_similarity(encoder, vocab, batch_size):
+def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+    """ sentence embedding test
+        v2. answer attentioned vector in light of question vector
+    """
+    with torch.no_grad():
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
+
+        # because of batch, need expansion for input tensor
+        temp = input_tensor
+        for _ in range(batch_size-1):
+            temp = torch.cat((temp, input_tensor), 0)
+        input_tensor = temp
+
+        encoder_hidden = encoder.init_hidden(max_length)
+
+        encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
+
+        decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)  # SOS
+        decoder_hidden = encoder_hidden
+
+        for di in range(max_length):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            topv, topi = decoder_output.data.topk(1)
+            decoder_input = topi.squeeze().view(1, batch_size)
+
+        C_Q = encoder_hidden[0][0].view(1, -1)
+        C_A = decoder_hidden[0][0].view(1, -1)
+
+        L = torch.matmul(C_A.transpose(0, 1), C_Q)
+        A_Q = softmax(L)
+        C_QA = torch.matmul(C_A, A_Q)
+
+        return C_QA
+
+
+def get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+    """ sentence embedding test
+        v2. answer attentioned vector in light of question vector
+    """
+    with torch.no_grad():
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
+
+        # because of batch, need expansion for input tensor
+        temp = input_tensor
+        for _ in range(batch_size-1):
+            temp = torch.cat((temp, input_tensor), 0)
+        input_tensor = temp
+
+        encoder_hidden = encoder.init_hidden(max_length)
+
+        encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
+
+        decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)  # SOS
+        decoder_hidden = encoder_hidden
+
+        for di in range(max_length):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+            topv, topi = decoder_output.data.topk(1)
+            decoder_input = topi.squeeze().view(1, batch_size)
+
+        C_Q = encoder_hidden[0][0].view(1, -1)
+        C_A = decoder_hidden[0][0].view(1, -1)
+
+        L = torch.matmul(C_Q.transpose(0, 1), C_A)
+        A_A = softmax(L)
+        C_AQ = torch.matmul(C_Q, A_A)
+
+        return C_AQ
+
+
+def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
     train_list, test_list, test_answer = prepare_evaluate()
 
     # embed candidates
@@ -75,6 +172,7 @@ def evaluate_similarity(encoder, vocab, batch_size):
     print("[INFO] encoding train %d data ..." % len(train_list))
     for d in train_list.keys():
         embedded = get_embed(encoder, train_list[d], vocab, batch_size)
+        #embedded = get_embed_concat(encoder, decoder, train_list[d], vocab, batch_size)
         train_embed[d] = embedded
     print("[INFO] done")
 
@@ -84,6 +182,7 @@ def evaluate_similarity(encoder, vocab, batch_size):
     answer1 = 0
     for i, tk in enumerate(test_list.keys()):
         embedded = get_embed(encoder, test_list[tk], vocab, batch_size)
+        #embedded = get_embed_concat(encoder, decoder, train_list[d], vocab, batch_size)
         temp = {}
         for candi in train_embed.keys():
             t = train_embed[candi].view(encoder.hidden_dim)
@@ -165,7 +264,9 @@ def evaluateRandomly(encoder, decoder, pairs, vocab, batch_size, n=10):
         output_sentence = ' '.join(pretty_printer(out))
         print('<', output_sentence)
         print('')
-    print("Average BLEU score: %.2f" % (total_bleu_score/len(result_batch)))
+    avg_bleu = total_bleu_score/len(result_batch)
+    print("Average BLEU score: %.2f" % avg_bleu)
+    return avg_bleu
 
 
 def evaluate_with_print(encoder, vocab, batch_size):
