@@ -33,17 +33,19 @@ def get_embed(encoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     with torch.no_grad():
         input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
 
-        # because of batch, need expansion for input tensor
+        # for batch, need expansion for input tensor
         temp = input_tensor
         for _ in range(batch_size-1):
             temp = torch.cat((temp, input_tensor), 0)
         input_tensor = temp
 
-        encoder_hidden = encoder.init_hidden(max_length)
+        input_tensor = input_tensor.transpose(0, 1)
+
+        encoder_hidden = encoder.init_hidden(batch_size)
 
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
-        # encoder_hidden -> sentence embedding
+        # consider last encoder_hidden as sentence embedding
         return encoder_hidden[0][0].view(1, 1, -1)
 
 
@@ -94,7 +96,7 @@ def get_embed_concat(encoder, decoder, sentence, vocab, batch_size, max_length=M
         return torch.cat((C_Q, C_A), 0)
 
 
-def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+def get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     """ sentence embedding test
         v2. answer attentioned vector in light of question vector
     """
@@ -129,7 +131,7 @@ def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_lengt
         return C_QA
 
 
-def get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     """ sentence embedding test
         v2. answer attentioned vector in light of question vector
     """
@@ -185,8 +187,8 @@ def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
         #embedded = get_embed_concat(encoder, decoder, train_list[d], vocab, batch_size)
         temp = {}
         for candi in train_embed.keys():
-            t = train_embed[candi].view(encoder.hidden_dim)
-            e = embedded.view(encoder.hidden_dim)
+            t = train_embed[candi].view(encoder.hidden_size)
+            e = embedded.view(encoder.hidden_size)
             temp[candi] = cosine_similarity(t, e)
 
         top_n = get_top_n(temp, 5)
@@ -210,9 +212,8 @@ def evaluate(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGT
     with torch.no_grad():
         input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, sentence)
 
-        encoder_hidden = encoder.init_hidden(max_length)
-
-        encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
+        encoder_hidden = encoder.init_hidden(batch_size)
+        #encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
 
         input_tensor = input_tensor.transpose(0, 1)
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
@@ -289,8 +290,8 @@ def evaluate_with_print(encoder, vocab, batch_size):
         embedded = get_embed(encoder, test_list[tk], vocab, batch_size)
         temp = {}
         for candi in train_embed.keys():
-            t = train_embed[candi].view(encoder.hidden_dim)
-            e = embedded.view(encoder.hidden_dim)
+            t = train_embed[candi].view(encoder.hidden_size)
+            e = embedded.view(encoder.hidden_size)
             temp[candi] = cosine_similarity(t, e)
 
         top_n = get_top_n(temp, 5)

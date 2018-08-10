@@ -16,19 +16,20 @@ from const import *
 
 global batch_size
 
-def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
 
-    encoder_hidden = encoder.init_hidden(max_length)
+def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
 
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
-    encoder_outputs = torch.zeros(max_length, encoder.hidden_dim, device=device)
-
-    loss = 0
-
+    # gru needs input of shape (seq_len, batch, input_size)
+    # ([40, 15]) => ([15, 40])
     input_tensor = input_tensor.transpose(0, 1)
     target_tensor = target_tensor.transpose(0, 1)
+
+    encoder_hidden = encoder.init_hidden(batch_size)
+
+    loss = 0
 
     encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
@@ -49,21 +50,22 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     return loss.item() / max_length
 
 
-def trainIters(epoch, encoder, decoder, n_iters, pairs, vocab, train_loader,
+def trainIters(args, epoch, encoder, decoder, n_iters, pairs, vocab, train_loader,
         print_every=1000, plot_every=100, learning_rate=0.01):
     start = time.time()
     plot_losses = []
     print_loss_total = 0  # Reset every print_every
     plot_loss_total = 0  # Reset every plot_every
 
-    encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
-
-    #encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    #decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
-
-    #encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
-    #decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
+    if args.optim == 'RMSprop':
+        encoder_optimizer = optim.RMSprop(encoder.parameters(), lr=learning_rate)
+        decoder_optimizer = optim.RMSprop(decoder.parameters(), lr=learning_rate)
+    elif args.optim == 'Adam':
+        encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+        decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
+    elif args.optim == 'SGD':
+        encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
+        decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
 
     criterion = nn.NLLLoss()
 
@@ -90,10 +92,11 @@ if __name__=="__main__":
     parser.add_argument('--decoder', help='load exisited model')
     parser.add_argument('--optim', default='RMSprop')
     parser.add_argument('--batch_size', type=int, default=40)
-    parser.add_argument('--hidden_size', type=int, default=64)
+    parser.add_argument('--hidden_size', type=int, default=128)
     parser.add_argument('--w_embed_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--epoch', type=int, default=400)
+    parser.add_argument('--epoch', type=int, default=1200)
+    parser.add_argument('--save', choices=['y', 'n'], default='n')
     args = parser.parse_args()
 
     train_file = 'data/cqa_train_komoran.txt'
@@ -136,7 +139,7 @@ if __name__=="__main__":
     print(args)
     for epoch in range(1, total_epoch+1):
         random.shuffle(train_data)
-        trainIters(epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=2, learning_rate=0.001)
+        trainIters(args, epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=2, learning_rate=0.001)
 
         if epoch % 20 == 0:
             a_at_5, a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
@@ -144,9 +147,10 @@ if __name__=="__main__":
             if a_at_1 > max_a_at_1:
                 max_a_at_1 = a_at_1
                 print("[INFO] New record! accuracy@1: %.4f" % a_at_1)
-                torch.save(encoder.state_dict(), 'encoder-max.model')
-                torch.save(decoder.state_dict(), 'decoder-max.model')
-                print("[INFO] new model saved")
+                if args.save == 'y':
+                    torch.save(encoder.state_dict(), 'encoder-max.model')
+                    torch.save(decoder.state_dict(), 'decoder-max.model')
+                    print("[INFO] new model saved")
 
             if a_at_5 > max_a_at_5:
                 max_a_at_5 = a_at_5
@@ -158,6 +162,7 @@ if __name__=="__main__":
 
     print("Done! max accuracy@5: %.4f, max accuracy@1: %.4f" % (max_a_at_5, max_a_at_1))
     print("max bleu: %.2f" % max_bleu)
-    torch.save(encoder.state_dict(), 'encoder-last.model')
-    torch.save(decoder.state_dict(), 'decoder-last.model')
+    if args.save == 'y':
+        torch.save(encoder.state_dict(), 'encoder-last.model')
+        torch.save(decoder.state_dict(), 'decoder-last.model')
 
