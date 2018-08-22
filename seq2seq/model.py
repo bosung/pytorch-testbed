@@ -8,23 +8,22 @@ from const import *
 
 class Encoder(nn.Module):
 
-    def __init__(self, vocab_size, embed_size, hidden_size, batch_size, weight=None):
+    def __init__(self, vocab_size, embed_size, hidden_size, batch_size, embedding_weight=None):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
         self.embed_size = embed_size
         self.batch_size = batch_size
 
-        if weight is None:
+        if embedding_weight is None:
             self.embedding = nn.Embedding(vocab_size, embed_size)
         else:
-            self.embedding = nn.Embedding.from_pretrained(weight, freeze=False)
+            self.embedding = nn.Embedding.from_pretrained(embedding_weight, freeze=False)
 
-        self.gru = nn.GRU(embed_size, hidden_size)
+        self.gru = nn.GRU(embed_size, hidden_size, batch_first=True)
 
     def forward(self, inputs, hidden):
         embedded = self.embedding(inputs)
-        output = embedded
-        output, hidden = self.gru(output, hidden)
+        output, hidden = self.gru(embedded, hidden)
         return output, hidden
 
     def init_hidden(self, batch_size):
@@ -33,31 +32,28 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, out_vocab_size, embed_size, hidden_size, batch_size, weight=None):
+    def __init__(self, out_vocab_size, embed_size, hidden_size, batch_size, embedding_weight=None):
         super(Decoder, self).__init__()
         self.hidden_size = hidden_size
         self.embed_size = embed_size
         self.batch_size = batch_size
 
-        if weight is None:
-            self.embedding = nn.Embedding(out_vocab_size, embed_size)
+        if embedding_weight is None:
+            self.embedding = nn.Embedding(vocab_size, embed_size)
         else:
-            self.embedding = nn.Embedding.from_pretrained(weight, freeze=False)
+            self.embedding = nn.Embedding.from_pretrained(embedding_weight, freeze=False)
 
-        self.gru = nn.GRU(embed_size, hidden_size)
+        self.gru = nn.GRU(embed_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, out_vocab_size)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, inputs, hidden):
-        output = self.embedding(inputs).view(1, -1, self.embed_size)
+        output = self.embedding(inputs).view(-1, 1, self.embed_size)
         output = F.relu(output)
         output, hidden = self.gru(output, hidden)
-        # output.size() = ([1, batch_size, hidden_size])
-        output = self.softmax(self.out(output[0]))
+        output = output.transpose(1, 2)
+        output = self.softmax(self.out(output.view(-1, self.hidden_size)))
         return output, hidden
-
-    def init_hidden(self, batch_size):
-        return torch.zeros(1, batch_size, self.hidden_size, device=device)
 
 
 class AttentionDecoder(nn.Module):

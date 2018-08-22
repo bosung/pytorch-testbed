@@ -22,23 +22,19 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
-    # gru needs input of shape (seq_len, batch, input_size)
-    # ([40, 15]) => ([15, 40])
-    input_tensor = input_tensor.transpose(0, 1)
-    target_tensor = target_tensor.transpose(0, 1)
-
     encoder_hidden = encoder.init_hidden(batch_size)
 
     loss = 0
 
     encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
-    decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)
+    decoder_input = torch.tensor([batch_size * [SOS_token]], device=device).view(batch_size, 1)
     decoder_hidden = encoder_hidden
+
+    target_tensor = target_tensor.transpose(0, 1)
 
     for di in range(max_length):
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-
         loss += criterion(decoder_output, target_tensor[di])
         decoder_input = target_tensor[di]  # Teacher forcing
 
@@ -86,7 +82,7 @@ def trainIters(args, epoch, encoder, decoder, n_iters, pairs, vocab, train_loade
                                 epoch, epoch / n_iters * 100, print_loss_avg))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--encoder', help='load exisited model')
     parser.add_argument('--decoder', help='load exisited model')
@@ -95,31 +91,29 @@ if __name__=="__main__":
     parser.add_argument('--hidden_size', type=int, default=128)
     parser.add_argument('--w_embed_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--epoch', type=int, default=1200)
+    parser.add_argument('--epoch', type=int, default=400)
     parser.add_argument('--save', choices=['y', 'n'], default='n')
+    parser.add_argument('--pre_trained_embed', choices=['y', 'n'], default='y')
     args = parser.parse_args()
-
-    train_file = 'data/cqa_train_komoran.txt'
-
-    vocab = Vocab()
-    vocab.build(train_file)
-    if args.encoder:
-        weight = empty_weight
-    else:
-        # load pre-trained embedding
-        weight = vocab.load_weight(path="data/komoran_hd_2times.vec")
 
     global batch_size
     batch_size = args.batch_size
-
     hidden_size = args.hidden_size
     w_embed_size = args.w_embed_size
 
-    train_data = prep.read_train_data(train_file)
-    train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    train_file = 'data/train_data_nv.txt'
 
-    encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
-    decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
+    vocab = Vocab()
+    vocab.build(train_file)
+
+    if args.pre_trained_embed == 'n':
+        encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
+        decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
+    else:
+        # load pre-trained embedding
+        weight = vocab.load_weight(path="data/komoran_hd_2times.vec")
+        encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
+        decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
 
     if args.encoder:
         encoder.load_state_dict(torch.load(args.encoder))
@@ -128,11 +122,14 @@ if __name__=="__main__":
         decoder.load_state_dict(torch.load(args.decoder))
         print("[INFO] load decoder with %s" % args.decoder)
 
-    #ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
-    #ev.evaluate_with_print(encoder, vocab, batch_size)
+    train_data = prep.read_train_data(train_file)
+    train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    # ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
+    # ev.evaluate_with_print(encoder, vocab, batch_size)
 
     # initialize
     max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
+    #max_a_at_5, max_a_at_1 = 0, 0
     max_bleu = 0
 
     total_epoch = args.epoch
@@ -141,7 +138,7 @@ if __name__=="__main__":
         random.shuffle(train_data)
         trainIters(args, epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=2, learning_rate=0.001)
 
-        if epoch % 20 == 0:
+        if epoch % 40 == 0:
             a_at_5, a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
 
             if a_at_1 > max_a_at_1:

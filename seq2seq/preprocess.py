@@ -10,12 +10,14 @@ class Vocab:
         self.index2word = {0: "<SOS>", 1: "</s>", 2: "<UNK>"}
         self.n_words = 3
 
-    def addSentence(self, sentence):
-        for l in sentence.split('\t'):
-            for word in l.split(' '):
-                self.addWord(word)
+    def add_sentence(self, sentence):
+        q, a, num = sentence.split('\t')
+        for word in q.split(' '):
+            self.add_word(word)
+        for word in a.split(' '):
+            self.add_word(word)
 
-    def addWord(self, word):
+    def add_word(self, word):
         if word not in self.word2index:
             self.word2index[word] = self.n_words
             self.word2count[word] = 1
@@ -29,7 +31,7 @@ class Vocab:
 
         lines = open(path, encoding='utf-8').read().strip().split('\n')
         for line in lines:
-            self.addSentence(line)
+            self.add_sentence(line)
 
         print("[INFO] total %s words" % self.n_words)
 
@@ -74,7 +76,7 @@ class Vocab:
 def read_train_data(path):
     #path = 'data/cqa_train.txt'
     lines = open(path, encoding='utf-8').read().strip().split('\n')
-    pairs = [[s for s in l.split('\t')] for l in lines]
+    pairs = [[l.split('\t')[0], l.split('\t')[1]] for l in lines]
     print("[INFO] read train data: %s ..." % pairs[0])
     return pairs
 

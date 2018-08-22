@@ -8,19 +8,24 @@ import torch.nn as nn
 
 from nltk.translate.bleu_score import sentence_bleu
 
-softmax = nn.Softmax(dim=0)
+softmax = nn.Softmax(dim=1)
+
+EMBED_PATH = 'data/komoran_hd_2times.vec'
+
+global pre_trained_embedding
+pre_trained_embedding=None
 
 def prepare_evaluate():
     train_data = {}
     test_data = {}
     test_answer = {}
 
-    lines = open('data/train_list_komoran.txt', 'r').read().strip().split('\n')
+    lines = open('data/train_data_all.txt', 'r').read().strip().split('\n')
     for l in lines:
-        q, num = l.split('\t')
+        q, a, num = l.split('\t')
         train_data[num] = q
 
-    lines = open('data/test_list_komoran.txt', 'r').read().strip().split('\n')
+    lines = open('data/test_data_all.txt', 'r').read().strip().split('\n')
     for l in lines:
         q, num, answer = l.split('\t')
         test_data[num] = q
@@ -31,15 +36,12 @@ def prepare_evaluate():
 
 def get_embed(encoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     with torch.no_grad():
-        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
-
         # for batch, need expansion for input tensor
-        temp = input_tensor
-        for _ in range(batch_size-1):
-            temp = torch.cat((temp, input_tensor), 0)
-        input_tensor = temp
+        sent = []
+        for _ in range(batch_size):
+            sent.append(sentence)
 
-        input_tensor = input_tensor.transpose(0, 1)
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, sent)
 
         encoder_hidden = encoder.init_hidden(batch_size)
 
@@ -62,33 +64,20 @@ def get_embed_concat(encoder, decoder, sentence, vocab, batch_size, max_length=M
             temp = torch.cat((temp, input_tensor), 0)
         input_tensor = temp
 
-        encoder_hidden = encoder.init_hidden(max_length)
+        input_tensor = input_tensor.transpose(0, 1)
+
+        encoder_hidden = encoder.init_hidden(batch_size)
 
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
         decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)  # SOS
         decoder_hidden = encoder_hidden
 
-        decoded_words_batch = []
-        for _ in range(batch_size):
-            decoded_words_batch.append([])
-
         #print(decoder_input)
         for di in range(max_length):
             decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-            #print(decoder_hidden.squeeze()[0][:7])
             topv, topi = decoder_output.data.topk(1)
             decoder_input = topi.squeeze().view(1, batch_size)
-
-            #print(decoder_input)
-            #print(decoder_output.size())
-            for i, out in enumerate(decoder_output):
-                top = out.data.topk(1)[1]
-                #print(top.item())
-                if top.item() == EOS_token:
-                    decoded_words_batch[i].append('<EOS>')
-                else:
-                    decoded_words_batch[i].append(vocab.index2word[top.item()])
 
         # concat two hidden vector of encoder, decoder
         C_Q = encoder_hidden[0][0].view(1, -1)
@@ -109,7 +98,9 @@ def get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=
             temp = torch.cat((temp, input_tensor), 0)
         input_tensor = temp
 
-        encoder_hidden = encoder.init_hidden(max_length)
+        input_tensor = input_tensor.transpose(0, 1)
+
+        encoder_hidden = encoder.init_hidden(batch_size)
 
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
@@ -127,13 +118,12 @@ def get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=
         L = torch.matmul(C_A.transpose(0, 1), C_Q)
         A_Q = softmax(L)
         C_QA = torch.matmul(C_A, A_Q)
-
         return C_QA
 
 
 def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     """ sentence embedding test
-        v2. answer attentioned vector in light of question vector
+        v3. answer attentioned vector in light of question vector
     """
     with torch.no_grad():
         input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
@@ -144,7 +134,9 @@ def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_lengt
             temp = torch.cat((temp, input_tensor), 0)
         input_tensor = temp
 
-        encoder_hidden = encoder.init_hidden(max_length)
+        input_tensor = input_tensor.transpose(0, 1)
+
+        encoder_hidden = encoder.init_hidden(batch_size)
 
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
@@ -164,6 +156,114 @@ def get_embed_ans_pivot(encoder, decoder, sentence, vocab, batch_size, max_lengt
         C_AQ = torch.matmul(C_Q, A_A)
 
         return C_AQ
+
+
+def get_embed_avg(encoder, vocab, sentence):
+    """ fine-tuned word embedding average """
+    with torch.no_grad():
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
+
+        # because of batch, need expansion for input tensor
+        #temp = input_tensor
+        #for _ in range(batch_size-1):
+        #    temp = torch.cat((temp, input_tensor), 0)
+        #input_tensor = temp
+
+        #input_tensor = input_tensor.transpose(0, 1)
+
+        embedded = encoder.embedding(input_tensor)
+        embedded = embedded[0]
+        embedded = embedded.mean(dim=0)
+        #print(embedded.size())
+        return embedded
+
+
+def get_word_embed_matrix(sentence, vocab, _pre_trained_embedding):
+    with torch.no_grad():
+        test_in = prep.tensorFromSentence(vocab, sentence)
+
+        x = _pre_trained_embedding[test_in[0]].view(1, -1)
+        for i in test_in[1:]:
+            x = torch.cat((x, _pre_trained_embedding[i].view(1, -1)), 0)
+
+        return x
+
+
+def get_hidden_vector_matrix(encoder, sentence, vocab, batch_size):
+    sent = []
+    for e in range(batch_size):
+        sent.append(sentence)
+
+    input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, sent)
+    encoder_hidden = encoder.init_hidden(batch_size)
+
+    input_tensor = input_tensor.transpose(0, 1)
+    print(input_tensor.size())
+
+    for ei in range(MAX_LENGTH):
+        print(input_tensor[ei].view(-1, 1).size())
+        print(encoder_hidden.size())
+        encoder_output, encoder_hidden = encoder(input_tensor[ei].view(-1, 1), encoder_hidden)
+        print(encoder_hidden.size())
+
+
+def get_embed_with_ans_words(encoder, sentence, vocab, batch_size, pre_trained_embedding, train_features, test_features, doc, decoder):
+    we_matrix = get_word_embed_matrix(sentence, vocab, pre_trained_embedding)
+    # print(we_matrix.size())
+
+    ans_tfidf = {}
+    if decoder is None:
+        # train
+        features = train_features
+    else:
+        features = test_features
+
+    for ans in doc.ans_words:
+        if len(ans.split("/")) == 2 and ans.split("/")[1][0] == "N" and ans.split("/")[1] != "NNB":
+            tf = math.log(1 + doc.bow[ans])
+            idf = math.log(features.doc_size/len(features.term_doc_dict[ans]))
+            ans_tfidf[ans] = tf * idf
+
+    top_n = get_top_n(ans_tfidf, 5)
+
+    for d in top_n:
+        emd = pre_trained_embedding[vocab.word2index[d]].view(1, -1)
+        we_matrix = torch.cat((we_matrix, emd), 0)
+        # print(we_matrix.size())
+
+    x = we_matrix
+    attn_matrix = torch.matmul(x, x.transpose(0, 1))
+    # result = attn_matrix
+    result = softmax(attn_matrix)
+    self_attn_matrix = torch.matmul(result, x)
+
+    # represent sentece by averaging matrix
+    applied_sent = torch.mean(self_attn_matrix, 0)
+    return applied_sent
+    # return we_matrix.mean(dim=0)
+
+
+def get_embed_we_sa(encoder, decoder, sentence, vocab, batch_size, pre_trained_embedding):
+    with torch.no_grad():
+        #cq = get_embed(encoder, sentence, vocab, batch_size, max_length=15).view(1, -1)
+        cq = get_embed_q_pivot(encoder, decoder, sentence, vocab, batch_size, max_length=15).view(1, -1)
+
+        if pre_trained_embedding is None:
+            pre_trained_embedding = vocab.load_weight(EMBED_PATH)
+        test_in = prep.tensorFromSentence(vocab, sentence)
+
+        x = pre_trained_embedding[test_in[0]].view(1, -1)
+        for i in test_in[1:]:
+            x = torch.cat((x, pre_trained_embedding[i].view(1, -1)), 0)
+
+        attn_matrix = torch.matmul(x, x.transpose(0, 1))
+        result = attn_matrix
+        #result = softmax(attn_matrix)
+        self_attn_matrix = torch.matmul(result, x)
+
+        # represent sentece by averaging matrix
+        applied_sent = torch.mean(self_attn_matrix, 0).view(1, -1)
+        return torch.cat((cq, applied_sent), 1)
 
 
 def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
@@ -213,9 +313,7 @@ def evaluate(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGT
         input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, sentence)
 
         encoder_hidden = encoder.init_hidden(batch_size)
-        #encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
 
-        input_tensor = input_tensor.transpose(0, 1)
         encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
         decoder_input = torch.tensor([[SOS_token] * batch_size], device=device).view(1, batch_size)  # SOS
