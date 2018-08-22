@@ -23,10 +23,16 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     decoder_optimizer.zero_grad()
 
     encoder_hidden = encoder.init_hidden(batch_size)
+    encoder_outputs = torch.zeros(max_length, batch_size, encoder.hidden_size, device=device)
 
     loss = 0
 
-    encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
+    input_tensor = input_tensor.transpose(0, 1)
+
+    for ei in range(max_length):
+        it = input_tensor[ei].view(batch_size, -1)
+        encoder_output, encoder_hidden = encoder(it, encoder_hidden)
+        encoder_outputs[ei] = encoder_output.transpose(1, 2).view(batch_size, encoder.hidden_size)
 
     decoder_input = torch.tensor([batch_size * [SOS_token]], device=device).view(batch_size, 1)
     decoder_hidden = encoder_hidden
@@ -128,8 +134,8 @@ if __name__ == "__main__":
     # ev.evaluate_with_print(encoder, vocab, batch_size)
 
     # initialize
-    max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
-    #max_a_at_5, max_a_at_1 = 0, 0
+    # max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
+    max_a_at_5, max_a_at_1 = 0, 0
     max_bleu = 0
 
     total_epoch = args.epoch

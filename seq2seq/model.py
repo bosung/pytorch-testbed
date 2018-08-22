@@ -57,6 +57,9 @@ class Decoder(nn.Module):
 
 
 class AttentionDecoder(nn.Module):
+    """
+    Apply attention based on https://arxiv.org/pdf/1508.04025.pdf
+    """
 
     def __init__(self, out_vocab_size, embed_size, hidden_size, batch_size, dropout_p=0.1, max_length=MAX_LENGTH):
         super(AttentionDecoder, self).__init__()
