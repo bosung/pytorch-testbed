@@ -1,4 +1,4 @@
-from model import Encoder, Decoder
+from model import Encoder, Decoder, AttentionDecoder
 from preprocess import Vocab
 import preprocess as prep
 import evaluate as ev
@@ -40,7 +40,8 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     target_tensor = target_tensor.transpose(0, 1)
 
     for di in range(max_length):
-        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+        decoder_output, decoder_hidden, decoder_attention = decoder(
+            decoder_input, decoder_hidden, encoder_outputs)
         loss += criterion(decoder_output, target_tensor[di])
         decoder_input = target_tensor[di]  # Teacher forcing
 
@@ -114,12 +115,12 @@ if __name__ == "__main__":
 
     if args.pre_trained_embed == 'n':
         encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
-        decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
+        decoder = AttentionDecoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
     else:
         # load pre-trained embedding
         weight = vocab.load_weight(path="data/komoran_hd_2times.vec")
         encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
-        decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
+        decoder = AttentionDecoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
 
     if args.encoder:
         encoder.load_state_dict(torch.load(args.encoder))
