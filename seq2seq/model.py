@@ -39,7 +39,7 @@ class Decoder(nn.Module):
         self.batch_size = batch_size
 
         if embedding_weight is None:
-            self.embedding = nn.Embedding(vocab_size, embed_size)
+            self.embedding = nn.Embedding(out_vocab_size, embed_size)
         else:
             self.embedding = nn.Embedding.from_pretrained(embedding_weight, freeze=False)
 
@@ -58,7 +58,7 @@ class Decoder(nn.Module):
 
 class AttentionDecoder(nn.Module):
     """
-    Apply attention based on https://arxiv.org/pdf/1508.04025.pdf
+    Apply attention based on Luong et al. (2015)
     """
 
     def __init__(self, out_vocab_size, embed_size, hidden_size, batch_size, embedding_weight=None, dropout_p=0.1, max_length=MAX_LENGTH):
@@ -77,34 +77,61 @@ class AttentionDecoder(nn.Module):
         self.attention = nn.Linear(self.hidden_size, self.hidden_size)
         self.attention_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
         self.dropout = nn.Dropout(self.dropout_p)
-        self.gru = nn.GRU(embed_size, hidden_size)
+        self.gru = nn.GRU(embed_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, out_vocab_size)
 
     def forward(self, inputs, hidden, encoder_outputs):
-        embedded = self.embedding(inputs).view(1, -1, self.hidden_size)
-        embedded - self.dropout(embedded)
+        embedded = self.embedding(inputs).view(self.batch_size, -1, self.embed_size)
+        embedded = self.dropout(embedded)
 
         # step 1. GRU
         gru_out, hidden = self.gru(embedded, hidden)
+        next_hidden = hidden
 
-        print(encoder_outputs.size()) # (15, 40, 128)
-        print(hidden.size()) # (40, 128)
+        # print(encoder_outputs.size()) # (15, 40, 128)
+        # print(hidden.size()) # (1, 40, 128)
+        hidden = hidden.transpose(0, 1)
 
-        # step 2. general score
-        for e in range(encoder_outputs.size(0)):
-            attn_prod = torch.bmm(hidden, self.attention(encoder_outputs))
-            # attn_prod = (40, 15)
+        attn_prod = self.general_score(encoder_outputs, hidden)
+        #attn_prod = self.dot_score(encoder_outputs, hidden)
+
+        # attention_weights = (40, 15)
+        attn_prod = attn_prod.transpose(0, 1)
         attention_weights = F.softmax(attn_prod, dim=1)
 
         a_w = attention_weights.unsqueeze(1)
 
         e_o = encoder_outputs.transpose(0, 1)
-        attention_applied = torch.bmm(a_w, e_o)
+        # c_t
+        # context = (40, 1, 128)
+        context = torch.bmm(a_w, e_o)
 
-        output = torch.cat((embedded[0], attention_applied.transpose(0, 1)[0]), 1)
+        # h_t = tanh(Wc[c_t;h_t])
+        context = context.squeeze(1)
+        hidden = hidden.squeeze(1)
+        output = torch.cat((context, hidden), 1)
         output = self.attention_combine(output).unsqueeze(0)
-        output = F.relu(output)
+        out_ht = F.tanh(output)
+        # final_hidden = output
+        output = F.log_softmax(self.out(out_ht[0]), dim=1)
 
-        output = F.log_softmax(self.out(output[0]), dim=1)
-        return output, hidden, attention_weights
+        return output, next_hidden, attention_weights
+
+    def general_score(self, encoder_outputs, hidden):
+        attn_prod = torch.zeros(encoder_outputs.size(0), self.batch_size, device=device)
+        # step 2. Score(h_t, h_s)
+        # general score
+        for e in range(encoder_outputs.size(0)):
+            attn_prod[e] = torch.bmm(
+                    hidden, self.attention(encoder_outputs[e]).unsqueeze(2)).view(self.batch_size, -1).transpose(0, 1)
+        return attn_prod
+
+    def dot_score(self, encoder_outputs, hidden):
+        attn_prod = torch.zeros(encoder_outputs.size(0), self.batch_size, device=device)
+        # step 2. Score(h_t, h_s)
+        # dot score
+        for e in range(encoder_outputs.size(0)):
+            attn_prod[e] = torch.bmm(
+                    hidden, encoder_outputs[e].unsqueeze(2)).view(self.batch_size, -1).transpose(0, 1)
+        return attn_prod
 

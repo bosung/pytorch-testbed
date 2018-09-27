@@ -40,8 +40,9 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     target_tensor = target_tensor.transpose(0, 1)
 
     for di in range(max_length):
-        decoder_output, decoder_hidden, decoder_attention = decoder(
-            decoder_input, decoder_hidden, encoder_outputs)
+        #decoder_output, decoder_hidden, decoder_attention = decoder(
+        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+        #    decoder_input, decoder_hidden, encoder_outputs)
         loss += criterion(decoder_output, target_tensor[di])
         decoder_input = target_tensor[di]  # Teacher forcing
 
@@ -116,11 +117,13 @@ if __name__ == "__main__":
     if args.pre_trained_embed == 'n':
         encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
         decoder = AttentionDecoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
+        # decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size).to(device)
     else:
         # load pre-trained embedding
         weight = vocab.load_weight(path="data/komoran_hd_2times.vec")
         encoder = Encoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
         decoder = AttentionDecoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
+        # decoder = Decoder(vocab.n_words, w_embed_size, hidden_size, batch_size, weight).to(device)
 
     if args.encoder:
         encoder.load_state_dict(torch.load(args.encoder))
@@ -131,12 +134,13 @@ if __name__ == "__main__":
 
     train_data = prep.read_train_data(train_file)
     train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+
     # ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
     # ev.evaluate_with_print(encoder, vocab, batch_size)
 
     # initialize
-    # max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
-    max_a_at_5, max_a_at_1 = 0, 0
+    max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
+    # max_a_at_5, max_a_at_1 = 0, 0
     max_bleu = 0
 
     total_epoch = args.epoch
@@ -145,16 +149,16 @@ if __name__ == "__main__":
         random.shuffle(train_data)
         trainIters(args, epoch, encoder, decoder, total_epoch, train_data, vocab, train_loader, print_every=2, learning_rate=0.001)
 
-        if epoch % 40 == 0:
+        if epoch % 20 == 0:
             a_at_5, a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
 
             if a_at_1 > max_a_at_1:
                 max_a_at_1 = a_at_1
                 print("[INFO] New record! accuracy@1: %.4f" % a_at_1)
-                if args.save == 'y':
-                    torch.save(encoder.state_dict(), 'encoder-max.model')
-                    torch.save(decoder.state_dict(), 'decoder-max.model')
-                    print("[INFO] new model saved")
+                # if args.save == 'y':
+                #    torch.save(encoder.state_dict(), 'encoder-max.model')
+                #    torch.save(decoder.state_dict(), 'decoder-max.model')
+                #    print("[INFO] new model saved")
 
             if a_at_5 > max_a_at_5:
                 max_a_at_5 = a_at_5
@@ -163,6 +167,10 @@ if __name__ == "__main__":
             bleu = ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
             if bleu > max_bleu:
                 max_bleu = bleu
+                if args.save == 'y':
+                    torch.save(encoder.state_dict(), 'encoder-max.model')
+                    torch.save(decoder.state_dict(), 'decoder-max.model')
+                    print("[INFO] new model saved")
 
     print("Done! max accuracy@5: %.4f, max accuracy@1: %.4f" % (max_a_at_5, max_a_at_1))
     print("max bleu: %.2f" % max_bleu)
