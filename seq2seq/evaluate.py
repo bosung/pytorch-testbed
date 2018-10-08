@@ -18,21 +18,23 @@ pre_trained_embedding=None
 
 def prepare_evaluate():
     train_data = {}
+    train_answer = {}
     test_data = {}
     test_answer = {}
 
-    lines = open('data/train_data_all.txt', 'r').read().strip().split('\n')
+    lines = open('data/train_data_nv.txt', 'r').read().strip().split('\n')
     for l in lines:
         q, a, num = l.split('\t')
         train_data[num] = q
+        train_answer[num] = a
 
-    lines = open('data/test_data_all.txt', 'r').read().strip().split('\n')
+    lines = open('data/test_data_nv.txt', 'r').read().strip().split('\n')
     for l in lines:
         q, num, answer = l.split('\t')
         test_data[num] = q
         test_answer[num] = answer
 
-    return train_data, test_data, test_answer
+    return train_data, train_answer, test_data, test_answer
 
 
 def get_embed(encoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
@@ -85,6 +87,7 @@ def get_embed_concat(encoder, decoder, sentence, vocab, batch_size, max_length=M
         C_A = decoder_hidden[0][0].view(1, -1)
         return torch.cat((C_Q, C_A), 0)
 
+
 def get_ende_hidden(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
     with torch.no_grad():
         input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
@@ -104,7 +107,6 @@ def get_ende_hidden(encoder, decoder, sentence, vocab, batch_size, max_length=MA
             encoder_output, encoder_hidden = encoder(it, encoder_hidden)
             encoder_outputs[ei] = encoder_output.transpose(1, 2).view(batch_size, encoder.hidden_size)
 
-
         decoder_input = torch.tensor([batch_size * [SOS_token]], device=device).view(batch_size, 1)  # SOS
 
         decoder_hidden = encoder_hidden
@@ -119,6 +121,43 @@ def get_ende_hidden(encoder, decoder, sentence, vocab, batch_size, max_length=MA
         C_Q = encoder_hidden[0][0].view(1, -1)
         C_A = decoder_hidden[0][0].view(1, -1)
         return C_Q, C_A
+
+
+def get_hiddens(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
+    """ return hidden vectors h_ba, h_tilda """
+    with torch.no_grad():
+        input_tensor = prep.tensorFromSentenceBatchWithPadding(vocab, [sentence])
+
+        # because of batch, need expansion for input tensor
+        temp = input_tensor
+        for _ in range(batch_size-1):
+            temp = torch.cat((temp, input_tensor), 0)
+        input_tensor = temp
+
+        input_tensor = input_tensor.transpose(0, 1)
+
+        encoder_hidden = encoder.init_hidden(batch_size)
+        encoder_outputs = torch.zeros(max_length, batch_size, encoder.hidden_size, device=device)
+        encoder_h_bar = torch.zeros(max_length, encoder.hidden_size, device=device)
+
+        for ei in range(max_length):
+            it = input_tensor[ei].view(batch_size, -1)
+            encoder_output, encoder_hidden = encoder(it, encoder_hidden)
+            encoder_outputs[ei] = encoder_output.transpose(1, 2).view(batch_size, encoder.hidden_size)
+            encoder_h_bar[ei] = encoder_hidden[0][0]
+
+        decoder_input = torch.tensor([batch_size * [SOS_token]], device=device).view(batch_size, 1)  # SOS
+        decoder_hidden = encoder_hidden
+        decoder_h_tilda = torch.zeros(max_length, decoder.hidden_size, device=device)
+
+        for di in range(max_length):
+            decoder_output, decoder_hidden, decoder_attention, h_tilda = decoder(
+                    decoder_input, decoder_hidden, encoder_outputs)
+            topv, topi = decoder_output.data.topk(1)
+            decoder_input = topi.squeeze().view(1, batch_size)
+            decoder_h_tilda[di] = h_tilda[0]
+
+        return encoder_h_bar, decoder_h_tilda
 
 
 def get_attn_hidden_avg(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGTH):
@@ -282,6 +321,7 @@ def get_word_embed_avg_sa(vocab, sentence, pre_trained_embedding):
     applied_sent = torch.mean(self_attn_matrix, 0)
     return applied_sent
 
+
 def get_de_out_embed(encoder, decoder, vocab, sentence, batch_size, pre_trained_embedding):
     # for batch
 
@@ -302,6 +342,7 @@ def get_de_out_embed_sa(encoder, decoder, vocab, sentence, batch_size, pre_train
 
     decoder_out = evaluate(encoder, decoder, sent, vocab, batch_size)
     return get_word_embed_avg_sa(vocab, ' '.join(decoder_out[0]), pre_trained_embedding)
+
 
 def get_embed_with_ans_words(encoder, sentence, vocab, batch_size, pre_trained_embedding, train_features, test_features, doc, decoder):
     we_matrix = get_word_embed_matrix(sentence, vocab, pre_trained_embedding)
@@ -363,7 +404,7 @@ def get_embed_we_sa(encoder, decoder, sentence, vocab, batch_size, pre_trained_e
 
 
 def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
-    train_list, test_list, test_answer = prepare_evaluate()
+    train_list, _, test_list, test_answer = prepare_evaluate()
 
     # embed candidates
     train_embed = {}
@@ -427,7 +468,7 @@ def evaluate(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGT
 
         #print(decoder_input)
         for di in range(max_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
+            decoder_output, decoder_hidden, decoder_attention, _ = decoder(
             # decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
                     decoder_input, decoder_hidden, encoder_outputs)
             topv, topi = decoder_output.data.topk(1)
@@ -451,10 +492,12 @@ def evaluate(encoder, decoder, sentence, vocab, batch_size, max_length=MAX_LENGT
 def evaluateRandomly(encoder, decoder, pairs, vocab, batch_size, n=10):
     # test = [p[0] for p in pairs][:batch_size]
     # answer = [p[1] for p in pairs][:batch_size]
-    train_list, test_list, test_answer = prepare_evaluate()
-    test_keys = random.shuffle(test_list.keys())
+    train_list, train_answer, test_list, test_answer = prepare_evaluate()
+    test_keys = list(test_list.keys())
+    test_keys.remove('4')
+    random.shuffle(test_keys)
     test = [test_list[p] for p in test_keys][:batch_size]
-    answer = [test_answer[p] for p in test_keys][:batch_size]
+    answer = [train_answer[test_answer[p]] for p in test_keys][:batch_size]
 
     result_batch = evaluate(encoder, decoder, test, vocab, batch_size)
 

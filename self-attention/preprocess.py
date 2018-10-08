@@ -82,29 +82,10 @@ def read_train_data(path):
 
 def indexesFromSentence(vocab, sentence):
     return [vocab.word2index[word] if word in vocab.word2index else UNK_token \
-            for word in sentence.split(' ')][:MAX_LENGTH-1]
+            for word in sentence.split(' ')]
 
 
 def tensorFromSentence(vocab, sentence):
     indexes = indexesFromSentence(vocab, sentence)
-    indexes.append(EOS_token)
     return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
-
-def tensorFromSentenceBatchWithPadding(vocab, sentence_list):
-    indexes = []
-    for sentence in sentence_list:
-        index = indexesFromSentence(vocab, sentence)
-        index.append(EOS_token)
-
-        count = MAX_LENGTH - len(index)
-        for _ in range(count):
-            index.append(0)
-
-        indexes += index
-    return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, MAX_LENGTH)
-
-def tensorsFromPair(vocab, pair):
-    input_tensor = tensorFromSentence(vocab, pair[0])
-    target_tensor = tensorFromSentence(vocab, pair[1])
-    return (input_tensor, target_tensor)
 

@@ -59,7 +59,7 @@ def build_test_docs(test_list, encoder, decoder, vocab, batch_size):
 
 
 def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
-    train_list, test_list, test_answer = ev.prepare_evaluate()
+    train_list, _, test_list, test_answer = ev.prepare_evaluate()
 
     pre_trained_embedding = vocab.load_weight(EMBED_PATH)
 
@@ -112,8 +112,34 @@ def evaluate_similarity(encoder, vocab, batch_size, decoder=None):
     print("total: %d, accuracy@5: %.4f, accuracy@1: %.4f" % (total, accuracy_at_5, accuracy_at_1))
 
 
+def get_top_n_idx(tensor1d, n):
+    d = {}
+    for i, x in enumerate(tensor1d.data):
+        d[i] = float(x)
+    result = {}
+    num = 0
+    for key, value in reversed(sorted(d.items(), key=lambda i: (i[1], i[0]))):
+        result[key] = value
+        num += 1
+        if num == n:
+            break
+    return list(result.keys())
+
+
+def get_hirel_n_ans_avg(h_bar, h_tilda, n):
+    associate_matrix = torch.matmul(h_bar, h_tilda.transpose(0, 1))
+    reduced = torch.sum(associate_matrix, 0)
+    high_rel_idx = get_top_n_idx(reduced, n)
+
+    high_rel_answer = h_tilda[high_rel_idx[0]].unsqueeze(0)
+    for i in range(1, len(high_rel_idx)):
+        high_rel_answer = torch.cat((high_rel_answer, h_tilda[high_rel_idx[i]].unsqueeze(0)), 0)
+
+    return torch.mean(high_rel_answer, 0)
+
+
 def eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=None, alpha=0.9):
-    train_list, test_list, test_answer = ev.prepare_evaluate()
+    train_list, _, test_list, test_answer = ev.prepare_evaluate()
 
     # tf-idf
     docs, doc_list = build_docs(train_file)
@@ -127,11 +153,13 @@ def eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=None,
     train_a_embed = {}
     print("[INFO] encoding train %d data ..." % len(train_list))
     for d in docs.keys():
-        train_q_embed[d] = ev.get_word_embed_avg(vocab, docs[d].q, pre_trained_embedding)
-        train_a_embed[d] = ev.get_word_embed_avg(vocab, docs[d].ans, pre_trained_embedding)
-        # train_q_embed[d], train_a_embed[d] = ev.get_ende_hidden(encoder, decoder, docs[d].q, vocab, batch_size)
+        # TODO
+        h_bar, h_tilda = ev.get_hiddens(encoder, decoder, docs[d].q, vocab, batch_size)
+        # train_a_embed[d] = get_hirel_n_ans_avg(h_bar, h_tilda, 3)
+        # h_bar.size() = (15, 300)
+        train_q_embed[d] = torch.mean(h_bar, 0)
+        train_a_embed[d] = torch.mean(h_tilda, 0)
     print("[INFO] done")
-    # return
 
     print("[INFO] start evaluating!")
     print("==================>", alpha)
@@ -139,9 +167,12 @@ def eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=None,
     answer5 = 0
     answer1 = 0
     for i, tk in enumerate(test_docs.keys()):
-        q_embed = ev.get_word_embed_avg(vocab, test_docs[tk].q, pre_trained_embedding)
-        a_embed = ev.get_de_out_embed(encoder, decoder, vocab, test_docs[tk].q, 40, pre_trained_embedding)
-        # q_embed, a_embed = ev.get_ende_hidden(encoder, decoder, test_docs[tk].q, vocab, batch_size)
+        h_bar_, h_tilda_ = ev.get_hiddens(encoder, decoder, test_docs[tk].q, vocab, batch_size)
+
+        # a_embed = get_hirel_n_ans_avg(h_bar_, h_tilda_, 3)
+        a_embed = torch.mean(h_tilda_, 0)
+        q_embed = torch.mean(h_bar_, 0)
+
         # cacluate score
         temp_q = {}
         temp_a = {}
@@ -270,6 +301,8 @@ if __name__=="__main__":
     eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=decoder, alpha=0.9)
     eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=decoder, alpha=0.85)
     eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=decoder, alpha=0.8)
+    eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=decoder, alpha=0.7)
+    #eval_sim_lc(encoder, vocab, batch_size, pre_trained_embedding, decoder=decoder, alpha=0.6)
 
     """
     train_list, test_list, test_answer = ev.prepare_evaluate()

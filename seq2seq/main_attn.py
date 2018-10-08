@@ -32,7 +32,8 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     for ei in range(max_length):
         it = input_tensor[ei].view(batch_size, -1)
         encoder_output, encoder_hidden = encoder(it, encoder_hidden)
-        encoder_outputs[ei] = encoder_output.transpose(1, 2).view(batch_size, encoder.hidden_size)
+        # encoder_outputs[ei].size = (40, 128)
+        encoder_outputs[ei] = encoder_output.transpose(1, 2).squeeze(2)
 
     decoder_input = torch.tensor([batch_size * [SOS_token]], device=device).view(batch_size, 1)
     decoder_hidden = encoder_hidden
@@ -40,7 +41,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     target_tensor = target_tensor.transpose(0, 1)
 
     for di in range(max_length):
-        decoder_output, decoder_hidden, decoder_attention = decoder(
+        decoder_output, decoder_hidden, decoder_attention, _ = decoder(
             decoder_input, decoder_hidden, encoder_outputs)
         loss += criterion(decoder_output, target_tensor[di])
         decoder_input = target_tensor[di]  # Teacher forcing
@@ -137,8 +138,8 @@ if __name__ == "__main__":
     # ev.evaluate_with_print(encoder, vocab, batch_size)
 
     # initialize
-    # max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
-    max_a_at_5, max_a_at_1 = 0, 0
+    max_a_at_5, max_a_at_1 = ev.evaluate_similarity(encoder, vocab, batch_size, decoder=decoder)
+    # max_a_at_5, max_a_at_1 = 0, 0
     max_bleu = 0
 
     total_epoch = args.epoch
@@ -153,21 +154,21 @@ if __name__ == "__main__":
             if a_at_1 > max_a_at_1:
                 max_a_at_1 = a_at_1
                 print("[INFO] New record! accuracy@1: %.4f" % a_at_1)
-                # if args.save == 'y':
-                #    torch.save(encoder.state_dict(), 'encoder-max.model')
-                #    torch.save(decoder.state_dict(), 'decoder-max.model')
-                #    print("[INFO] new model saved")
 
             if a_at_5 > max_a_at_5:
                 max_a_at_5 = a_at_5
                 print("[INFO] New record! accuracy@5: %.4f" % a_at_5)
+                if args.save == 'y':
+                    torch.save(encoder.state_dict(), 'encoder-max.model')
+                    torch.save(decoder.state_dict(), 'decoder-max.model')
+                    print("[INFO] new model saved")
 
             bleu = ev.evaluateRandomly(encoder, decoder, train_data, vocab, batch_size)
             if bleu > max_bleu:
                 max_bleu = bleu
                 if args.save == 'y':
-                    torch.save(encoder.state_dict(), 'encoder-max.model')
-                    torch.save(decoder.state_dict(), 'decoder-max.model')
+                    torch.save(encoder.state_dict(), 'encoder-max-bleu.model')
+                    torch.save(decoder.state_dict(), 'decoder-max-bleu.model')
                     print("[INFO] new model saved")
 
     print("Done! max accuracy@5: %.4f, max accuracy@1: %.4f" % (max_a_at_5, max_a_at_1))

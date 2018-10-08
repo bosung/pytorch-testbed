@@ -28,6 +28,7 @@ class Encoder(nn.Module):
 
     def init_hidden(self, batch_size):
         return torch.zeros(1, batch_size, self.hidden_size, device=device)
+        #return torch.zeros((batch_size, 1, self.hidden_size), device=device)
 
 
 class Decoder(nn.Module):
@@ -87,13 +88,15 @@ class AttentionDecoder(nn.Module):
         # step 1. GRU
         gru_out, hidden = self.gru(embedded, hidden)
         next_hidden = hidden
+        # hidden.size() = (1, 40, 128)
 
         # print(encoder_outputs.size()) # (15, 40, 128)
         # print(hidden.size()) # (1, 40, 128)
-        hidden = hidden.transpose(0, 1)
+        # hidden = hidden.transpose(0, 1)
 
+        # step 2. socre(h_t, h_s)
         attn_prod = self.general_score(encoder_outputs, hidden)
-        #attn_prod = self.dot_score(encoder_outputs, hidden)
+        # attn_prod = self.dot_score(encoder_outputs, hidden)
 
         # attention_weights = (40, 15)
         attn_prod = attn_prod.transpose(0, 1)
@@ -108,18 +111,21 @@ class AttentionDecoder(nn.Module):
 
         # h_t = tanh(Wc[c_t;h_t])
         context = context.squeeze(1)
-        hidden = hidden.squeeze(1)
+        hidden = hidden.squeeze(0)
         output = torch.cat((context, hidden), 1)
-        output = self.attention_combine(output).unsqueeze(0)
-        out_ht = F.tanh(output)
+        output = self.attention_combine(output)
+        out_ht = torch.tanh(output) # h_tilda
         # final_hidden = output
-        output = F.log_softmax(self.out(out_ht[0]), dim=1)
+        output = F.log_softmax(self.out(out_ht), dim=1)
 
-        return output, next_hidden, attention_weights
+        return output, next_hidden, attention_weights, out_ht
 
     def general_score(self, encoder_outputs, hidden):
+        """ step 2. score(h_t, h_s) general score """
         attn_prod = torch.zeros(encoder_outputs.size(0), self.batch_size, device=device)
-        # step 2. Score(h_t, h_s)
+        # print(hidden.size()) # (1, 40, 128) need transpose for bmm
+        hidden = hidden.transpose(0, 1)
+
         # general score
         for e in range(encoder_outputs.size(0)):
             attn_prod[e] = torch.bmm(
@@ -127,8 +133,11 @@ class AttentionDecoder(nn.Module):
         return attn_prod
 
     def dot_score(self, encoder_outputs, hidden):
+        """ step 2. score(h_t, h_s) dot score """
         attn_prod = torch.zeros(encoder_outputs.size(0), self.batch_size, device=device)
-        # step 2. Score(h_t, h_s)
+        # print(hidden.size()) # (1, 40, 128) need transpose for bmm
+        hidden = hidden.transpose(0, 1)
+
         # dot score
         for e in range(encoder_outputs.size(0)):
             attn_prod[e] = torch.bmm(
