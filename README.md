@@ -1,6 +1,6 @@
 # pytorch-examples
 
-### cnn/
+### cnn
 
 The paper Yoon Kim, Convolutional Neural Networks for Entence Classification, EMNLP 2017
 
@@ -12,8 +12,7 @@ Pytorch examples based on tutorials 'http://pytorch.org/tutorials/'. Deep learni
 
 encoder-decoder model with attention (Luong et al. 2016)
 
-### simple sentence embedding with self-attention
-
-average-of-word embeddings representation (AWE) with self-attention (scaled dot product attention, Vaswani et al. 2017)
+### self-attention
+simple sentence embedding with self-attention: average-of-word embeddings representation (AWE) with self-attention (scaled dot product attention, Vaswani et al. 2017)
 
 
