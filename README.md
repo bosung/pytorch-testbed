@@ -1,18 +1,11 @@
-# pytorch-examples
+This is testbed for deep learning experiments based on [OpenNMT](https://github.com/OpenNMT/OpenNMT-py) code
 
-### cnn
+### preprocess
+```angular2html
+python preprocess.py --train_src=data/semeval/train.tsv --valid_src=data/semeval/dev.tsv --save_data=data/semeval/temp
+```
 
-The paper Yoon Kim, Convolutional Neural Networks for Entence Classification, EMNLP 2017
-
-### dl_nlp, rnn
-
-Pytorch examples based on tutorials 'http://pytorch.org/tutorials/'. Deep learning for NLP
-
-### seq2seq
-
-encoder-decoder model with attention (Luong et al. 2016)
-
-### self-attention
-simple sentence embedding with self-attention: average-of-word embeddings representation (AWE) with self-attention (scaled dot product attention, Vaswani et al. 2017)
-
-
+### train
+```angular2html
+python train.py -data data/semeval/temp -save_model temp-model
+```
