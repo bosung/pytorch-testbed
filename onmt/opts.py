@@ -554,6 +554,21 @@ def train_opts(parser):
                    "model faster and smaller")
 
 
+def evaluate_opts(parser):
+    """ evaluate options """
+    group = parser.add_argument_group('Model')
+    group.add('--model', '-model', dest='models', metavar='MODEL',
+              nargs='+', type=str, default=[], required=True,
+              help="Path to model .pt file(s). "
+                   "Multiple models can be specified, "
+                   "for ensemble decoding.")
+
+    group = parser.add_argument_group('Data')
+    group.add('--src', '-src', required=True,
+              help="Source sequence to decode (one line per "
+                   "sequence)")
+
+
 def translate_opts(parser):
     """ Translation / inference options """
     group = parser.add_argument_group('Model')
