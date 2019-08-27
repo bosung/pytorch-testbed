@@ -110,7 +110,7 @@ def load_test_model(opt, model_path=None):
     if opt.fp32:
         model.float()
     model.eval()
-    model.generator.eval()
+    model.classifier.eval()
     return fields, model, model_opt
 
 

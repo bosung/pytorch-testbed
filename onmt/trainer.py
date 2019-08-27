@@ -305,15 +305,16 @@ class Trainer(object):
             stats = onmt.utils.Statistics()
 
             for batch in valid_iter:
-                src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                                   else (batch.src, None)
-                tgt = batch.tgt
+                # src, src_lengths = batch.src if isinstance(batch.src, tuple) \
+                #                    else (batch.src, None)
+                # tgt = batch.tgt
+                sent1, sent2 = batch.sent1, batch.sent2
 
                 # F-prop through the model.
-                outputs, attns = valid_model(src, tgt, src_lengths)
+                outputs = valid_model(sent1, sent2)
 
                 # Compute loss.
-                _, batch_stats = self.valid_loss(batch, outputs, attns)
+                _, batch_stats = self.valid_loss(batch, outputs, None)
 
                 # Update statistics.
                 stats.update(batch_stats)
@@ -346,7 +347,7 @@ class Trainer(object):
             # if src_lengths is not None:
             #     report_stats.n_src_words += src_lengths.sum().item()
 
-            tgt_outer = batch.label
+            # tgt_outer = batch.label
 
             # for j in range(0, target_size-1, trunc_size):
                 # 1. Create truncated target.

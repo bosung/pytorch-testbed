@@ -100,20 +100,20 @@ class ModelSaver(ModelSaverBase):
         real_model = (model.module
                       if isinstance(model, nn.DataParallel)
                       else model)
-        real_generator = (real_model.generator.module
-                          if isinstance(real_model.generator, nn.DataParallel)
-                          else real_model.generator)
+        real_classifier = (real_model.classifier.module
+                          if isinstance(real_model.classifier, nn.DataParallel)
+                          else real_model.classifier)
 
         model_state_dict = real_model.state_dict()
         model_state_dict = {k: v for k, v in model_state_dict.items()
                             if 'generator' not in k}
-        generator_state_dict = real_generator.state_dict()
+        classifier_state_dict = real_classifier.state_dict()
 
         # NOTE: We need to trim the vocab to remove any unk tokens that
         # were not originally here.
 
         vocab = deepcopy(self.fields)
-        for side in ["src", "tgt"]:
+        for side in ["sent1", "sent2"]:
             keys_to_pop = []
             if hasattr(vocab[side], "fields"):
                 unk_token = vocab[side].fields[0][1].vocab.itos[0]
@@ -125,7 +125,7 @@ class ModelSaver(ModelSaverBase):
 
         checkpoint = {
             'model': model_state_dict,
-            'generator': generator_state_dict,
+            'classifier': classifier_state_dict,
             'vocab': vocab,
             'opt': self.model_opt,
             'optim': self.optim.state_dict(),
