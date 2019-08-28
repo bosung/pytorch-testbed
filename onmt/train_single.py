@@ -70,7 +70,7 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
         fields = vocab
 
     # Report src and tgt vocab sizes, including for features
-    for side in ['sent1', 'sent2', 'label']:
+    for side in ['sent1', 'sent2']:
         f = fields[side]
         try:
             f_iter = iter(f)

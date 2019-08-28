@@ -45,9 +45,8 @@ def build_save_dataset(corpus_type, fields, src_reader, opt):
     for src, maybe_id in zip(srcs, ids):
         logger.info("Reading source files: %s." % src)
 
-        src_shards = split_corpus(src, opt.shard_size)
-        # tgt_shards = split_corpus(tgt, opt.shard_size)
-        # shard_pairs = zip(src_shards, tgt_shards)
+        # src_shards = split_corpus(src, opt.shard_size)
+        src_shards = split_corpus(src, 0)
 
         dataset_paths = []
         # if (corpus_type == "train" or opt.filter_valid):
@@ -73,8 +72,11 @@ def build_save_dataset(corpus_type, fields, src_reader, opt):
 
         for i, src_shard in enumerate(src_shards):  # not considered shard
             logger.info("Building shard %d." % i)
+            _id = [line.strip().split("\t")[0] for line in src_shard[1:]]
             sent1 = [line.strip().split("\t")[1] for line in src_shard[1:]]
             sent2 = [line.strip().split("\t")[2] for line in src_shard[1:]]
+            prelogit1 = [0.0 for _ in src_shard[1:]]
+            prelogit2 = [0.0 for _ in src_shard[1:]]
             label = []
             for line in src_shard[1:]:
                 token = line.strip().split("\t")[3]
@@ -84,18 +86,19 @@ def build_save_dataset(corpus_type, fields, src_reader, opt):
                     label.append(0)
             dataset = inputters.Dataset(
                 fields,
-                readers=([src_reader, src_reader, src_reader]),
-                data=([("sent1", sent1), ("sent2", sent2), ("label", label)]),
+                readers=([src_reader, src_reader, src_reader, src_reader, src_reader, src_reader]),
+                data=([("id", _id), ("sent1", sent1), ("sent2", sent2),
+                       ("label", label), ("prelogit1", prelogit1), ("prelogit2", prelogit2)]),
                 # data=([("src", src_shard), ("tgt", tgt_shard)]
                 #       if tgt_reader else [("src", src_shard)]),
-                dirs=([opt.src_dir, opt.src_dir, opt.src_dir]),
+                dirs=([None, None, None, None, None, None]),
                 sort_key=inputters.str2sortkey[opt.data_type],
                 filter_pred=filter_pred
             )
             if corpus_type == "train" and existing_fields is None:
                 for ex in dataset.examples:
                     for name, field in fields.items():
-                        if name == "label":
+                        if name in ["label", "id", "prelogit1", "prelogit2"]:
                             continue
                         try:
                             f_iter = iter(field)

@@ -9,3 +9,8 @@ python preprocess.py --train_src=data/semeval/train.tsv --valid_src=data/semeval
 ```angular2html
 python train.py -data data/semeval/temp -save_model temp-model -gpu_ranks 0
 ```
+
+### evaluate
+```angular2
+python evaluate.py -model temp-model_step_50000.pt -src data/semeval/test.tsv -output pred.txt -gpu 0
+```

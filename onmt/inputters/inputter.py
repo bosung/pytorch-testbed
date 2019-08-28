@@ -108,38 +108,21 @@ def get_fields(
                         "pad": pad, "bos": None, "eos": None,
                         "truncate": src_truncate,
                         "base_name": "src"}
+
     # fields["src"] = fields_getters[src_data_type](**src_field_kwargs)
     src_field_kwargs["base_name"] = "sent1"
     fields["sent1"] = fields_getters[src_data_type](**src_field_kwargs)
+
     src_field_kwargs["base_name"] = "sent2"
     fields["sent2"] = fields_getters[src_data_type](**src_field_kwargs)
-    # src_field_kwargs["base_name"] = "label"
-    # fields["label"] = fields_getters[src_data_type](**src_field_kwargs)
 
-    #tgt_field_kwargs = {"n_feats": n_tgt_feats,
-    #                    "include_lengths": False,
-    #                    "pad": pad, "bos": bos, "eos": eos,
-    #                    "truncate": tgt_truncate,
-    #                    "base_name": "tgt"}
-    #fields["tgt"] = fields_getters["text"](**tgt_field_kwargs)
-
+    fields["id"] = RawField()
     fields["label"] = Field(use_vocab=False, dtype=torch.long, sequential=False)
+    fields["prelogit1"] = Field(use_vocab=False, dtype=torch.float, sequential=False)
+    fields["prelogit2"] = Field(use_vocab=False, dtype=torch.float, sequential=False)
+
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
-
-    if dynamic_dict:
-        src_map = Field(
-            use_vocab=False, dtype=torch.float,
-            postprocessing=make_src, sequential=False)
-        fields["src_map"] = src_map
-
-        src_ex_vocab = RawField()
-        fields["src_ex_vocab"] = src_ex_vocab
-
-        align = Field(
-            use_vocab=False, dtype=torch.long,
-            postprocessing=make_tgt, sequential=False)
-        fields["alignment"] = align
 
     return fields
 
