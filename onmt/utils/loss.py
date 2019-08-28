@@ -52,14 +52,7 @@ def build_loss_compute(model, tgt_field, opt, train=True):
     # use_raw_logits = isinstance(criterion, SparsemaxLoss)
     # loss_gen = model.generator[0] if use_raw_logits else model.generator
     loss_gen = model.classifier
-    if opt.copy_attn:
-        compute = onmt.modules.CopyGeneratorLossCompute(
-            criterion, loss_gen, tgt_field.vocab, opt.copy_loss_by_seqlength,
-            lambda_coverage=opt.lambda_coverage
-        )
-    else:
-        compute = CLSLossCompute(
-            criterion, loss_gen, lambda_coverage=opt.lambda_coverage)
+    compute = CLSLossCompute(criterion, loss_gen, lambda_coverage=opt.lambda_coverage)
     compute.to(device)
 
     return compute
@@ -269,6 +262,21 @@ class CLSLossCompute(LossComputeBase):
         stats = self._stats(loss.clone(), scores, target)
 
         return loss, stats
+
+    def _stats(self, loss, scores, target):
+        pred = scores.max(1)[1]
+        positives = pred.sum().item()
+        tp = (pred * target).sum().item()  # true positive
+        trues = target.sum().item()
+
+        # non_padding = target.ne(self.padding_idx)
+        num_correct = pred.eq(target).sum().item()
+        # num_non_padding = non_padding.sum().item()
+        num_examples = target.size(0)
+        kwargs = {"loss": loss.item(), "n_words": num_examples, "n_correct": num_correct,
+                "positives": positives, "trues": trues, "tp": tp}
+        # return onmt.utils.Statistics(loss.item(), num_examples, num_correct)
+        return onmt.utils.Statistics(**kwargs)
 
     def _compute_coverage_loss(self, std_attn, coverage_attn):
         covloss = torch.min(std_attn, coverage_attn).sum(2).view(-1)

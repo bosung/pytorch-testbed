@@ -17,11 +17,14 @@ class Statistics(object):
     * elapsed time
     """
 
-    def __init__(self, loss=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, n_words=0, n_correct=0, positives=0, trues=0, tp=0):
         self.loss = loss
-        self.n_words = n_words
+        self.n_words = n_words  # n_words => n_examples
         self.n_correct = n_correct
         self.n_src_words = 0
+        self.positives = positives
+        self.trues = trues
+        self.tp = tp
         self.start_time = time.time()
 
     @staticmethod
@@ -81,6 +84,9 @@ class Statistics(object):
         self.loss += stat.loss
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
+        self.positives += stat.positives
+        self.trues += stat.trues
+        self.tp += stat.tp
 
         if update_n_src_words:
             self.n_src_words += stat.n_src_words
@@ -88,6 +94,12 @@ class Statistics(object):
     def accuracy(self):
         """ compute accuracy """
         return 100 * (self.n_correct / self.n_words)
+
+    def f1score(self):
+        precision = 0 if self.positives == 0 else self.tp / self.positives
+        recall = 0 if self.trues == 0 else self.tp / self.trues
+        return 0 if (precision + recall) == 0 else \
+            100 * 2 * (precision * recall) / (precision + recall)
 
     def xent(self):
         """ compute cross entropy """
@@ -114,9 +126,10 @@ class Statistics(object):
         if num_steps > 0:
             step_fmt = "%s/%5d" % (step_fmt, num_steps)
         logger.info(
-            ("Step %s; acc: %6.2f; ppl: %5.2f; xent: %4.2f; " +
+            ("Step %s; f1: %6.2f; acc: %6.2f; ppl: %5.2f; xent: %4.2f; " +
              "lr: %7.5f; %3.0f/%3.0f tok/s; %6.0f sec")
             % (step_fmt,
+               self.f1score(),
                self.accuracy(),
                self.ppl(),
                self.xent(),

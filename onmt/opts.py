@@ -562,11 +562,48 @@ def evaluate_opts(parser):
               help="Path to model .pt file(s). "
                    "Multiple models can be specified, "
                    "for ensemble decoding.")
+    group.add('--fp32', '-fp32', action='store_true',
+              help="Force the model to be in FP32 "
+                   "because FP16 is very slow on GTX1080(ti).")
 
     group = parser.add_argument_group('Data')
+    group.add('--data_type', '-data_type', default="text",
+              help="Type of the source input. Options: [text|img].")
+
     group.add('--src', '-src', required=True,
               help="Source sequence to decode (one line per "
                    "sequence)")
+    group.add('--src_dir', '-src_dir', default="",
+              help="Source directory for image or audio files.")
+
+    group = parser.add_argument_group('Logging')
+    group.add('--report_every', '-report_every', type=int, default=50,
+              help="Print stats at this interval.")
+    group.add('--log_file', '-log_file', type=str, default="",
+              help="Output logs to a file under this path.")
+    group.add('--log_file_level', '-log_file_level', type=str,
+              action=StoreLoggingLevelAction,
+              choices=StoreLoggingLevelAction.CHOICES,
+              default="0")
+    group.add('--exp_host', '-exp_host', type=str, default="",
+              help="Send logs to this crayon server.")
+    group.add('--exp', '-exp', type=str, default="",
+              help="Name of the experiment for logging.")
+    # Use TensorboardX for visualization during training
+    group.add('--tensorboard', '-tensorboard', action="store_true",
+              help="Use tensorboardX for visualization during training. "
+                   "Must have the library tensorboardX.")
+    group.add("--tensorboard_log_dir", "-tensorboard_log_dir",
+              type=str, default="runs/onmt",
+              help="Log directory for Tensorboard. "
+                   "This is also the name of the run.")
+
+    group.add('--gpu', '-gpu', type=int, default=-1,
+              help="Device to run on")
+    group.add('--lambda_coverage', '-lambda_coverage', type=float, default=0.0,
+              help='Lambda value for coverage loss of See et al (2017)')
+    group.add('--batch_size', '-batch_size', type=int, default=30,
+              help='Batch size')
 
 
 def translate_opts(parser):
