@@ -553,6 +553,9 @@ def train_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
+    group.add('--sampling', '-sampling', default=False)
+    group.add('--histloss', '-histloss', default=False)
+
 
 def evaluate_opts(parser):
     """ evaluate options """

@@ -6,6 +6,7 @@ import math
 
 from collections import Counter, defaultdict
 from itertools import chain, cycle
+import numpy as np
 
 import torch
 import torchtext.data
@@ -535,12 +536,14 @@ class OrderedIterator(torchtext.data.Iterator):
                  pool_factor=1,
                  batch_size_multiple=1,
                  yield_raw_example=False,
+                 sampling=False,
                  **kwargs):
         super(OrderedIterator, self).__init__(dataset, batch_size, **kwargs)
         self.batch_size_multiple = batch_size_multiple
         self.yield_raw_example = yield_raw_example
         self.dataset = dataset
         self.pool_factor = pool_factor
+        self.sampling = sampling
 
     def create_batches(self):
         if self.train:
@@ -550,6 +553,24 @@ class OrderedIterator(torchtext.data.Iterator):
                     1,
                     batch_size_fn=None,
                     batch_size_multiple=1)
+            elif self.sampling:
+                logger.info("Sampling Test")
+                pos = [x for x in self.dataset if x.label == 1]
+                neg = [x for x in self.dataset if x.label == 0]
+                neg_weight = softmax([x.prelogit1 for x in self.dataset if x.label == 0])
+                sampled = np.random.choice(neg, 6651, p=neg_weight)
+                _data = pos + sampled.tolist()
+                logger.info("Sample negative data. pos %d, neg %d" % (
+                    len(pos), len(sampled)
+                ))
+                self.batches = _pool(
+                    _data,
+                    self.batch_size,
+                    self.batch_size_fn,
+                    self.batch_size_multiple,
+                    self.sort_key,
+                    self.random_shuffler,
+                    self.pool_factor)
             else:
                 self.batches = _pool(
                     self.data(),
@@ -674,7 +695,8 @@ class DatasetLazyIter(object):
 
     def __init__(self, dataset_paths, fields, batch_size, batch_size_fn,
                  batch_size_multiple, device, is_train, pool_factor,
-                 repeat=True, num_batches_multiple=1, yield_raw_example=False):
+                 repeat=True, num_batches_multiple=1, yield_raw_example=False,
+                 sampling=False):
         self._paths = dataset_paths
         self.fields = fields
         self.batch_size = batch_size
@@ -686,6 +708,7 @@ class DatasetLazyIter(object):
         self.num_batches_multiple = num_batches_multiple
         self.yield_raw_example = yield_raw_example
         self.pool_factor = pool_factor
+        self.sampling = sampling
 
     def _iter_dataset(self, path):
         logger.info('Loading dataset from %s' % path)
@@ -703,7 +726,8 @@ class DatasetLazyIter(object):
             sort=False,
             sort_within_batch=True,
             repeat=False,
-            yield_raw_example=self.yield_raw_example
+            yield_raw_example=self.yield_raw_example,
+            sampling=self.sampling
         )
         for batch in cur_iter:
             self.dataset = cur_iter.dataset
@@ -797,9 +821,15 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
         opt.pool_factor,
         repeat=not opt.single_pass,
         num_batches_multiple=max(opt.accum_count) * opt.world_size,
-        yield_raw_example=multi)
+        yield_raw_example=multi,
+        sampling=opt.sampling
+    )
 
 
 def build_dataset_iter_multiple(train_shards, fields, opt):
     return MultipleDatasetIterator(
         train_shards, fields, "cuda" if opt.gpu_ranks else "cpu", opt)
+
+
+def softmax(x):
+    return np.exp(x)/sum(np.exp(x))

@@ -11,6 +11,7 @@
 
 from copy import deepcopy
 import torch
+import torch.nn as nn
 import traceback
 
 import onmt.utils
@@ -333,19 +334,7 @@ class Trainer(object):
             self.optim.zero_grad()
 
         for k, batch in enumerate(true_batches):
-            # target_size = batch.tgt.size(0)
-            # Truncated BPTT: reminder not compatible with accum > 1
-            # if self.trunc_size:
-            #     trunc_size = self.trunc_size
-            # else:
-            #     trunc_size = target_size
-
             sent1, sent2 = batch.sent1, batch.sent2
-
-            # src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-            #     else (batch.src, None)
-            # if src_lengths is not None:
-            #     report_stats.n_src_words += src_lengths.sum().item()
 
             # tgt_outer = batch.label
 
@@ -357,6 +346,11 @@ class Trainer(object):
             if self.accum_count == 1:
                 self.optim.zero_grad()
             outputs = self.model(sent1, sent2)
+
+            prob = nn.Softmax(1)(outputs)
+            # update logits !!
+            batch.prelogit1 = prob[:, 0]
+            batch.prelogit2 = prob[:, 1]
 
             # 3. Compute loss.
             try:
