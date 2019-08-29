@@ -139,6 +139,15 @@ class Statistics(object):
                time.time() - start))
         sys.stdout.flush()
 
+    def print_result(self):
+        logger.info(
+            "[Result] f1: %6.2f; acc: %6.2f; ppl: %5.2f; xent: %4.2f;"
+            % (self.f1score(),
+               self.accuracy(),
+               self.ppl(),
+               self.xent()))
+        sys.stdout.flush()
+
     def log_tensorboard(self, prefix, writer, learning_rate, step):
         """ display statistics to tensorboard """
         t = self.elapsed_time()

@@ -23,28 +23,25 @@ def build_loss_compute(model, tgt_field, opt, train=True):
     """
     device = torch.device("cuda" if onmt.utils.misc.use_gpu(opt) else "cpu")
 
-    # padding_idx = tgt_field.vocab.stoi[tgt_field.pad_token]
-    # unk_idx = tgt_field.vocab.stoi[tgt_field.unk_token]
+    def hist_loss(scores, target, pre_scores):
+        loss = nn.CrossEntropyLoss()(scores, target)
+        pre_loss = nn.CrossEntropyLoss()(pre_scores, target)
+        cur_dist = nn.Softmax(dim=1)(scores)[:, 1]
+        pre_dist = nn.LogSoftmax(dim=1)(pre_scores)[:, 1]
+        gap = nn.KLDivLoss(cur_dist, pre_dist)
+        gate = nn.Sigmoid()(3 * (1 - pre_loss))
+        final_loss = gate.item() * loss + (1-gate.item()) * (pre_loss + gap)
+        return final_loss
 
-    if opt.lambda_coverage != 0:
-        assert opt.coverage_attn, "--coverage_attn needs to be set in " \
-            "order to use --lambda_coverage != 0"
+    def cross_entropy(scores, target, _):
+        return nn.CrossEntropyLoss()(scores, target)
 
-    # if opt.copy_attn:
-    #     criterion = onmt.modules.CopyGeneratorLoss(
-    #         len(tgt_field.vocab), opt.copy_attn_force,
-    #         unk_index=unk_idx, ignore_index=padding_idx
-    #     )
-    # elif opt.label_smoothing > 0 and train:
-    #     criterion = LabelSmoothingLoss(
-    #         opt.label_smoothing, len(tgt_field.vocab), ignore_index=padding_idx
-    #     )
-    # # elif isinstance(model.generator[-1], LogSparsemax):
-    # #     criterion = SparsemaxLoss(ignore_index=padding_idx, reduction='sum')
-    # else:
-        # criterion = nn.NLLLoss(ignore_index=padding_idx, reduction='sum')
-    criterion = nn.CrossEntropyLoss()
+    if opt.histloss is True:
+        criterion = hist_loss
+    else:
+        criterion = cross_entropy
 
+    # criterion = nn.CrossEntropyLoss()
     # if the loss function operates on vectors of raw logits instead of
     # probabilities, only the first part of the generator needs to be
     # passed to the NMTLossCompute. At the moment, the only supported
@@ -249,18 +246,10 @@ class CLSLossCompute(LossComputeBase):
 
     def _compute_loss(self, batch, output, target, std_attn=None,
                       coverage_attn=None):
-
-        # bottled_output = self._bottle(output)
-
         scores = output
-
-        loss = self.criterion(scores, target)
-        if self.lambda_coverage != 0.0:
-            coverage_loss = self._compute_coverage_loss(
-                std_attn=std_attn, coverage_attn=coverage_attn)
-            loss += coverage_loss
+        loss = self.criterion(scores, target, batch)
+        # loss = self.criterion(scores, target)
         stats = self._stats(loss.clone(), scores, target)
-
         return loss, stats
 
     def _stats(self, loss, scores, target):
@@ -274,8 +263,7 @@ class CLSLossCompute(LossComputeBase):
         # num_non_padding = non_padding.sum().item()
         num_examples = target.size(0)
         kwargs = {"loss": loss.item(), "n_words": num_examples, "n_correct": num_correct,
-                "positives": positives, "trues": trues, "tp": tp}
-        # return onmt.utils.Statistics(loss.item(), num_examples, num_correct)
+                  "positives": positives, "trues": trues, "tp": tp}
         return onmt.utils.Statistics(**kwargs)
 
     def _compute_coverage_loss(self, std_attn, coverage_attn):
