@@ -12,6 +12,7 @@ from onmt.model_builder import load_test_model
 import onmt.inputters as inputters
 import onmt.opts as opts
 from onmt.utils.parse import ArgumentParser
+import subprocess
 
 
 def main(opt):
@@ -58,15 +59,17 @@ def main(opt):
         )
 
         stats = onmt.utils.Statistics()
+        ids = []
+        scores = []
         with torch.no_grad():
             for batch in data_iter:
-                # src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                #                    else (batch.src, None)
-                # tgt = batch.tgt
                 sent1, sent2 = batch.sent1, batch.sent2
 
-                # F-prop through the model.
                 outputs = model(sent1, sent2)
+                score = torch.nn.Softmax(dim=-1)(outputs)[:, 1]
+
+                ids.extend(batch.id)
+                scores.extend(score.tolist())
 
                 # Compute loss.
                 _, batch_stats = valid_loss(batch, outputs, None)
@@ -74,6 +77,21 @@ def main(opt):
                 # Update statistics.
                 stats.update(batch_stats)
         stats.print_result()
+        logger.info("writing pred.txt file...")
+        pred_file = "eval_utils/semeval/pred.txt"
+        with open(pred_file, "w") as fw:
+            for _id, score in zip(ids, scores):
+                q_id = "_".join(_id.split("_")[0:2])
+                ans_id = _id
+
+                label = "true" if score > 0.5 else "false"
+                fw.write("\t".join([q_id, ans_id, "0", score, label]))
+                fw.write("\n")
+
+        logger.info("run eval script file...")
+
+        subprocess.run(['python2.7', 'eval_utils/semeval/ev.py',
+                        'eval_utils/semeval/SemEval2017-task3-English-test-subtaskA.xml.subtaskA.relevancy', pred_file])
 
 
 def _get_parser():
