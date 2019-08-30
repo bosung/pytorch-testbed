@@ -553,9 +553,11 @@ def train_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
-    group.add('--sampling', '-sampling', default=False)
+    group.add('--sampling_size', '-sampling_size', type=int, default=0,
+              help="size for sampling on negative dataset")
     group.add('--histloss', '-histloss', default=False)
-
+    group.add('--wclsloss', '-wclsloss', default=False,
+              help='weighted class loss function')
 
 def evaluate_opts(parser):
     """ evaluate options """
@@ -608,6 +610,8 @@ def evaluate_opts(parser):
     group.add('--batch_size', '-batch_size', type=int, default=30,
               help='Batch size')
     group.add('--histloss', '-histloss', default=False)
+    group.add('--wclsloss', '-wclsloss', default=False,
+              help='weighted class loss function')
 
 
 def translate_opts(parser):

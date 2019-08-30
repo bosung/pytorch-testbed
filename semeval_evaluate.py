@@ -54,7 +54,7 @@ def main(opt):
             batch_size=opt.batch_size,
             train=False,
             sort=False,
-            sort_within_batch=True,
+            sort_within_batch=False,
             shuffle=False
         )
 
@@ -85,7 +85,7 @@ def main(opt):
                 ans_id = _id
 
                 label = "true" if score > 0.5 else "false"
-                fw.write("\t".join([q_id, ans_id, "0", score, label]))
+                fw.write("\t".join([q_id, ans_id, "0", str(score), label]))
                 fw.write("\n")
 
         logger.info("run eval script file...")

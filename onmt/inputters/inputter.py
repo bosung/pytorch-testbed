@@ -536,14 +536,14 @@ class OrderedIterator(torchtext.data.Iterator):
                  pool_factor=1,
                  batch_size_multiple=1,
                  yield_raw_example=False,
-                 sampling=False,
+                 sampling_size=0,
                  **kwargs):
         super(OrderedIterator, self).__init__(dataset, batch_size, **kwargs)
         self.batch_size_multiple = batch_size_multiple
         self.yield_raw_example = yield_raw_example
         self.dataset = dataset
         self.pool_factor = pool_factor
-        self.sampling = sampling
+        self.sampling_size = sampling_size
 
     def create_batches(self):
         if self.train:
@@ -553,12 +553,12 @@ class OrderedIterator(torchtext.data.Iterator):
                     1,
                     batch_size_fn=None,
                     batch_size_multiple=1)
-            elif self.sampling:
+            elif self.sampling_size > 0:
                 logger.info("Sampling Test")
                 pos = [x for x in self.dataset if x.label == 1]
                 neg = [x for x in self.dataset if x.label == 0]
-                neg_weight = softmax([x.prelogit1 for x in self.dataset if x.label == 0])
-                sampled = np.random.choice(neg, 6651, p=neg_weight)
+                neg_weight = softmax([x.prelogit2 for x in self.dataset if x.label == 0])
+                sampled = np.random.choice(neg, self.sampling_size, p=neg_weight)
                 _data = pos + sampled.tolist()
                 logger.info("Sample negative data. pos %d, neg %d" % (
                     len(pos), len(sampled)
@@ -587,7 +587,8 @@ class OrderedIterator(torchtext.data.Iterator):
                     self.batch_size,
                     batch_size_fn=self.batch_size_fn,
                     batch_size_multiple=self.batch_size_multiple):
-                self.batches.append(sorted(b, key=self.sort_key))
+                # self.batches.append(sorted(b, key=self.sort_key))
+                self.batches.append(b)
 
     def __iter__(self):
         """
@@ -696,7 +697,7 @@ class DatasetLazyIter(object):
     def __init__(self, dataset_paths, fields, batch_size, batch_size_fn,
                  batch_size_multiple, device, is_train, pool_factor,
                  repeat=True, num_batches_multiple=1, yield_raw_example=False,
-                 sampling=False):
+                 sampling_size=0):
         self._paths = dataset_paths
         self.fields = fields
         self.batch_size = batch_size
@@ -708,7 +709,7 @@ class DatasetLazyIter(object):
         self.num_batches_multiple = num_batches_multiple
         self.yield_raw_example = yield_raw_example
         self.pool_factor = pool_factor
-        self.sampling = sampling
+        self.sampling_size = sampling_size
 
     def _iter_dataset(self, path):
         logger.info('Loading dataset from %s' % path)
@@ -727,7 +728,7 @@ class DatasetLazyIter(object):
             sort_within_batch=True,
             repeat=False,
             yield_raw_example=self.yield_raw_example,
-            sampling=self.sampling
+            sampling_size=self.sampling_size
         )
         for batch in cur_iter:
             self.dataset = cur_iter.dataset
@@ -822,7 +823,7 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
         repeat=not opt.single_pass,
         num_batches_multiple=max(opt.accum_count) * opt.world_size,
         yield_raw_example=multi,
-        sampling=opt.sampling
+        sampling_size=opt.sampling_size
     )
 
 

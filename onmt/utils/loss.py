@@ -36,8 +36,13 @@ def build_loss_compute(model, tgt_field, opt, train=True):
     def cross_entropy(scores, target, _):
         return nn.CrossEntropyLoss()(scores, target)
 
+    def weighted_cls_loss(scores, target, _):
+        return nn.CrossEntropyLoss(weight=[0.59, 1])(scores, target)
+
     if opt.histloss is True:
         criterion = hist_loss
+    elif opt.wclsloss is True:
+        criterion = weighted_cls_loss
     else:
         criterion = cross_entropy
 
