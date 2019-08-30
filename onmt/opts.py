@@ -607,6 +607,7 @@ def evaluate_opts(parser):
               help='Lambda value for coverage loss of See et al (2017)')
     group.add('--batch_size', '-batch_size', type=int, default=30,
               help='Batch size')
+    group.add('--histloss', '-histloss', default=False)
 
 
 def translate_opts(parser):

@@ -28,23 +28,22 @@ class CLSModel(nn.Module):
             sent2 (Tensor, LongTensor): A source sequence passed to encoder.
 
         Returns:
+
             (FloatTensor, dict[str, FloatTensor]):
 
             * decoder output ``(tgt_len, batch, hidden)``
             * dictionary attention dists of ``(tgt_len, batch, src_len)``
         """
-        # tgt = tgt[:-1]  # exclude last target from inputs
 
+        # memory bank for attention (src_len, batch, hidden)
         enc_state, memory_bank1, lengths = self.encoder(sent1[0])
         enc_state, memory_bank2, lengths = self.encoder(sent2[0])
-        # if bptt is False:
-        #   self.decoder.init_state(src, memory_bank, enc_state)
 
-        memory_bank1 = memory_bank1[-1, :, :]
-        memory_bank2 = memory_bank2[-1, :, :]
-        cls_input = torch.cat([memory_bank1, memory_bank1,
-                               memory_bank1 * memory_bank2,
-                               memory_bank1 - memory_bank2], dim=1)
+        sent1_emb = memory_bank1.max(dim=0)[0]
+        sent2_emb = memory_bank2.max(dim=0)[0]
+        cls_input = torch.cat([sent1_emb, sent2_emb,
+                               torch.abs(sent1_emb - sent2_emb),
+                               sent1_emb * sent2_emb], dim=1)
         out = self.classifier(cls_input)
         return out
 

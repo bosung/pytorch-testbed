@@ -166,25 +166,14 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     # model = onmt.models.CLSModel(encoder)
 
     # Build Generator.
-    if not model_opt.copy_attn:
-        if model_opt.generator_function == "sparsemax":
-            gen_func = onmt.modules.sparse_activations.LogSparsemax(dim=-1)
-        else:
-            gen_func = nn.LogSoftmax(dim=-1)
-        classifier = nn.Sequential(
-            nn.Linear(model_opt.enc_rnn_size * 4, model_opt.enc_rnn_size),
-            nn.ReLU(),
-            nn.Linear(model_opt.enc_rnn_size, model_opt.n_label),
-            Cast(torch.float32),
-            gen_func
-        )
-        # if model_opt.share_decoder_embeddings:
-        #     generator[0].weight = decoder.embeddings.word_lut.weight
-    else:
-        tgt_base_field = fields["tgt"].base_field
-        vocab_size = len(tgt_base_field.vocab)
-        pad_idx = tgt_base_field.vocab.stoi[tgt_base_field.pad_token]
-        generator = CopyGenerator(model_opt.dec_rnn_size, vocab_size, pad_idx)
+    gen_func = nn.LogSoftmax(dim=-1)
+    classifier = nn.Sequential(
+        nn.Linear(model_opt.enc_rnn_size * 4, model_opt.enc_rnn_size),
+        nn.ReLU(),
+        nn.Linear(model_opt.enc_rnn_size, model_opt.n_label),
+        Cast(torch.float32),
+        # gen_func
+    )
 
     model = onmt.models.CLSModel(encoder, classifier)
 

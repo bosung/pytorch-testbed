@@ -345,7 +345,7 @@ class Trainer(object):
                 # 2. F-prop all but generator.
             if self.accum_count == 1:
                 self.optim.zero_grad()
-            outputs = self.model(sent1, sent2)
+            outputs = self.model(sent1, sent2)  # outputs without softmax
 
             prob = nn.Softmax(1)(outputs)
             # update logits !!
