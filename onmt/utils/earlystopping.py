@@ -60,11 +60,26 @@ class AccuracyScorer(Scorer):
         return stats.accuracy()
 
 
-DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer()]
+class F1Scorer(Scorer):
+
+    def __init__(self):
+        super(F1Scorer, self).__init__(float("-inf"), "f1")
+
+    def is_improving(self, stats):
+        return stats.f1score() > self.best_score
+
+    def is_decreasing(self, stats):
+        return stats.f1score() < self.best_score
+
+    def _caller(self, stats):
+        return stats.f1score()
+
+
+DEFAULT_SCORERS = [AccuracyScorer(), F1Scorer()]
 
 
 SCORER_BUILDER = {
-    "ppl": PPLScorer,
+    "f1": F1Scorer,
     "accuracy": AccuracyScorer
 }
 
