@@ -7,7 +7,12 @@ python preprocess.py --train_src=data/semeval/train.tsv --valid_src=data/semeval
 
 ### train
 ```angular2html
-python train.py -data data/semeval/temp -save_model temp-model -gpu_ranks 0
+python train.py \
+    -data data/semeval/temp \
+    -save_model temp-model \
+    -gpu_ranks 0 \
+    -early_stopping 5 \
+    -pre_word_vecs_enc data/semeval/embeddings.enc.pt
 ```
 
 ### evaluate

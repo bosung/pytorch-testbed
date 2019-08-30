@@ -27,7 +27,7 @@ def main(opt):
     fields, model, model_opt = load_test_model(opt)
 
     tgt_field = dict(fields)["label"]
-    # valid_loss = onmt.utils.loss.build_loss_compute(model, tgt_field, opt, train=False)
+    valid_loss = onmt.utils.loss.build_loss_compute(model, tgt_field, opt, train=False)
 
     src_shards = split_corpus(opt.src, 0)
 
@@ -62,9 +62,8 @@ def main(opt):
             shuffle=False
         )
 
+        stats = onmt.utils.Statistics()
         with torch.no_grad():
-            stats = onmt.utils.Statistics()
-
             for batch in data_iter:
                 # src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                 #                    else (batch.src, None)
@@ -74,24 +73,12 @@ def main(opt):
                 # F-prop through the model.
                 outputs = model(sent1, sent2)
 
-                output = model.classifier(outputs)
+                # Compute loss.
+                _, batch_stats = valid_loss(batch, outputs, None)
 
-                # # Compute loss.
-                # _, batch_stats = valid_loss(batch, outputs, None)
-                #
-                # # Update statistics.
-                # stats.update(batch_stats)
-
-
-        # translator.translate(
-        #     src=src_shard,
-        #     src_dir=opt.src_dir,
-        #     sent1=sent1,
-        #     sent2=sent2,
-        #     label=label,
-        #     batch_size=opt.batch_size,
-        #     attn_debug=opt.attn_debug
-        #     )
+                # Update statistics.
+                stats.update(batch_stats)
+        stats.print_result()
 
 
 def _get_parser():
