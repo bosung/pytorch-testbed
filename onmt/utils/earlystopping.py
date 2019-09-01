@@ -75,7 +75,7 @@ class F1Scorer(Scorer):
         return stats.f1score()
 
 
-DEFAULT_SCORERS = [AccuracyScorer(), F1Scorer()]
+DEFAULT_SCORERS = [F1Scorer()]
 
 
 SCORER_BUILDER = {

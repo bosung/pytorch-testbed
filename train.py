@@ -16,6 +16,10 @@ from onmt.inputters.inputter import build_dataset_iter, \
 
 from itertools import cycle
 
+from setproctitle import setproctitle
+
+setproctitle("(bosung) sentence classification")
+
 
 def main(opt):
     ArgumentParser.validate_train_opts(opt)
