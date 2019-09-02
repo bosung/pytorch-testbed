@@ -37,7 +37,8 @@ def build_loss_compute(model, tgt_field, opt, train=True):
         return nn.CrossEntropyLoss()(scores, target)
 
     def weighted_cls_loss(scores, target, _):
-        return nn.CrossEntropyLoss(weight=[0.59, 1])(scores, target)
+        n_target = torch.cat([(1 - target), target], dim=-1)
+        return nn.BCEWithLogitsLoss(weight=[0.49, 1])(scores, n_target)
 
     if opt.histloss is True:
         criterion = hist_loss
