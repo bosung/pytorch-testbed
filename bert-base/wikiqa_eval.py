@@ -39,10 +39,13 @@ def wikiqa_eval(ep, device, eval_examples, eval_dataloader, model, logger):
     eval_accuracy = eval_accuracy / nb_eval_example
     results = get_prf(data, thre=0.11)
     logger.info("\tWikiQA Question Triggering:")
-    logger.info("\taccuracy\tprecision\trecall\t\tF1\t\tMRR")
-    logger.info("\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f\t\t%.4f" % (
-        eval_accuracy, results[3], results[4], results[5], results[6]))
-    return results[5]  # return f1 score
+    logger.info("\taccuracy\tprecision\trecall\t\tF1\t\tMRR\t\tMAP")
+    logger.info("\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f" % (
+        eval_accuracy, results[3], results[4], results[5], results[7], results[8]))
+
+    result_log = "%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f" % (
+        eval_accuracy, results[3], results[4], results[5], results[7], results[8])
+    return results[5], result_log  # return f1 score and log
 
 
 def get_prf(data, thre=0.11):
@@ -94,14 +97,15 @@ def get_prf(data, thre=0.11):
     ########################
     # calculate MRR
     ########################
-    preqpos = ""
+    preqpos = data[0][0]
     q_list = []
     temp = []
     for parts in data:
         qpos, label, scr = parts[0], int(parts[3]), float(parts[4])
-        if qpos != preqpos and preqpos != "":
+        if qpos != preqpos:
             q_list.append(temp)
             temp = []
+            preqpos = qpos
         temp.append([qpos, label, scr])
     q_list.append(temp)
 
@@ -109,12 +113,31 @@ def get_prf(data, thre=0.11):
         return val[2]
 
     temp_mrr = 0
+    total_map = 0
+    valid_mrr_cnt = 0
+    valid_map_cnt = 0
     for q in q_list:
         q.sort(key=sort_by_score, reverse=True)
-        for i, elem in enumerate(data, 1):
+        # for MRR
+        for i, elem in enumerate(q, 1):
             if elem[1] == 1:
                 temp_mrr += (1/i)
-    mrr = temp_mrr/len(q_list)
+                valid_mrr_cnt += 1
+                break
+        # for MAP
+        positive = 0
+        temp_map = 0
+        for i, elem in enumerate(q, 1):
+            if positive == 0 and elem[1] == 1:
+                valid_map_cnt += 1
+            if elem[1] == 1:
+                positive += 1
+                temp_map += (positive/i)
+        if positive > 0:
+            ap = temp_map / positive
+            total_map += ap
+    mrr = temp_mrr/valid_mrr_cnt
+    map = total_map/valid_map_cnt
 
     match_cnt, ref_cnt, pred_cnt = 0.0, 0.0, 0.0
     for r, p in zip(ref, pred):
@@ -129,7 +152,8 @@ def get_prf(data, thre=0.11):
         if r == 1: ref_cnt += 1.0
         if pred[pidx] >= thre: pred_cnt += 1.0
         if r == 1 and pred[pidx] >= thre and ref[pidx] == 1: match_cnt += 1.0
-    qprec, qreca = match_cnt / pred_cnt, match_cnt / ref_cnt
+    qprec = match_cnt / pred_cnt if pred_cnt != 0 else 0
+    qreca = match_cnt / ref_cnt
 
     qmatch_cnt, qcnt = 0.0, 0.0
     for r, pidx in zip(qref, qpred_idx):
@@ -140,4 +164,6 @@ def get_prf(data, thre=0.11):
             qmatch_cnt += 1.0
     qacc = qmatch_cnt / qcnt
 
-    return [prec, reca, 2.0 * prec * reca / (prec + reca), qprec, qreca, 2.0 * qprec * qreca / (qprec + qreca), qacc, mrr]
+    return [prec, reca, 2.0 * prec * reca / (prec + reca) if (prec + reca) != 0 else 0,
+            qprec, qreca, 2.0 * qprec * qreca / (qprec + qreca) if (qprec + qreca) != 0 else 0,
+            qacc, mrr, map]
