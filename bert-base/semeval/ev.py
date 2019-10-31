@@ -209,39 +209,42 @@ def eval_reranker(res_fname="svm.test.res", pred_fname="svm.train.pred",
     avg_acc1_svm = metrics.avg_acc1(svm, th)
     avg_acc1_ir = metrics.avg_acc1(ir, th)
 
-    print ""
-    print "*** Official score (MAP for SYS): %5.4f" %(map_svm)
-    print ""
-    print ""
-    print "******************************"
-    print "*** Classification results ***"
-    print "******************************"
-    print ""
-    print "Acc = %5.4f" %(acc)
-    print "P   = %5.4f" %(p)
-    print "R   = %5.4f" %(r)
-    print "F1  = %5.4f" %(f1)
-    print ""
-    print ""
-    print "********************************"
-    print "*** Detailed ranking results ***"
-    print "********************************"
-    print ""
-    print "IR  -- Score for the output of the IR system (baseline)."
-    print "SYS -- Score for the output of the tested system."
-    print ""
-    print "%13s %5s" %("IR", "SYS")
-    print "MAP   : %5.4f %5.4f" %(map_se, map_svm)
-    print "AvgRec: %5.4f %5.4f" %(avg_acc1_ir, avg_acc1_svm)
-    print "MRR   : %6.2f %6.2f" %(mrr_se, mrr_svm)
-    print "%16s %6s  %14s %6s  %14s %6s  %12s %4s" % ("IR", "SYS", "IR", "SYS", "IR", "SYS", "IR", "SYS")
-    for i, (p_se, p_svm, a_se, a_svm, a_se1, a_svm1, a_se2, a_svm2) in enumerate(zip(prec_se, prec_svm, acc_se, acc_svm, acc_se1, acc_svm1, acc_se2, acc_svm2), 1):
-        print "REC-1@%02d: %6.2f %6.2f  ACC@%02d: %6.2f %6.2f  AC1@%02d: %6.2f %6.2f  AC2@%02d: %4.0f %4.0f" %(i, p_se, p_svm, i, a_se, a_svm, i, a_se1, a_svm1, i, a_se2, a_svm2)
-    print
-    print "REC-1 - percentage of questions with at least 1 correct answer in the top @X positions (useful for tasks where questions have at most one correct answer)"
-    print "ACC   - accuracy, i.e., number of correct answers retrieved at rank @X normalized by the rank and the total number of questions"
-    print "AC1   - the number of correct answers at @X normalized by the number of maximum possible answers (perfect re-ranker)"
-    print "AC2   - the absolute number of correct answers at @X"
+    print "acc\tf1\tMAP\tMRR\tAvgRec"
+    print "%.4f %4.4f %4.4f %4.4f %4.4f" % (acc, f1, map_svm, mrr_svm, avg_acc1_svm)
+
+    # print "
+    # print "*** Official score (MAP for SYS): %5.4f" %(map_svm)
+    # print ""
+    # print ""
+    # print "******************************"
+    # print "*** Classification results ***"
+    # print "******************************"
+    # print ""
+    # print "Acc = %5.4f" %(acc)
+    # print "P   = %5.4f" %(p)
+    # print "R   = %5.4f" %(r)
+    # print "F1  = %5.4f" %(f1)
+    # print ""
+    # print ""
+    # print "********************************"
+    # print "*** Detailed ranking results ***"
+    # print "********************************"
+    # print ""
+    # print "IR  -- Score for the output of the IR system (baseline)."
+    # print "SYS -- Score for the output of the tested system."
+    # print ""
+    # print "%13s %5s" %("IR", "SYS")
+    # print "MAP   : %5.4f %5.4f" %(map_se, map_svm)
+    # print "AvgRec: %5.4f %5.4f" %(avg_acc1_ir, avg_acc1_svm)
+    # print "MRR   : %6.2f %6.2f" %(mrr_se, mrr_svm)
+    # print "%16s %6s  %14s %6s  %14s %6s  %12s %4s" % ("IR", "SYS", "IR", "SYS", "IR", "SYS", "IR", "SYS")
+    # for i, (p_se, p_svm, a_se, a_svm, a_se1, a_svm1, a_se2, a_svm2) in enumerate(zip(prec_se, prec_svm, acc_se, acc_svm, acc_se1, acc_svm1, acc_se2, acc_svm2), 1):
+    #     print "REC-1@%02d: %6.2f %6.2f  ACC@%02d: %6.2f %6.2f  AC1@%02d: %6.2f %6.2f  AC2@%02d: %4.0f %4.0f" %(i, p_se, p_svm, i, a_se, a_svm, i, a_se1, a_svm1, i, a_se2, a_svm2)
+    # print
+    # print "REC-1 - percentage of questions with at least 1 correct answer in the top @X positions (useful for tasks where questions have at most one correct answer)"
+    # print "ACC   - accuracy, i.e., number of correct answers retrieved at rank @X normalized by the rank and the total number of questions"
+    # print "AC1   - the number of correct answers at @X normalized by the number of maximum possible answers (perfect re-ranker)"
+    # print "AC2   - the absolute number of correct answers at @X"
 
 
 def eval_reranker_subtaske(res_fname="svm.test.res", pred_fname="svm.train.pred",
@@ -371,20 +374,20 @@ def main():
 
     (options, args) = parser.parse_args()
 
-        if len(args) == 0:
-            print usage
+    if len(args) == 0:
+        print usage
     elif len(args) == 1:
         res_fname = args[0]
         eval_search_engine(res_fname, options.format, options.th)
     elif len(args) == 2:
         res_fname = args[0]
         pred_fname = args[1]
-                if 'subtaskE' in pred_fname:
-                    eval_reranker_subtaske(res_fname, pred_fname, options.format, options.th,
-                              options.verbose, options.reranking_th, options.ignore_noanswer)
-                else:	
+        if 'subtaskE' in pred_fname:
+            eval_reranker_subtaske(res_fname, pred_fname, options.format, options.th,
+                                   options.verbose, options.reranking_th, options.ignore_noanswer)
+        else:
             eval_reranker(res_fname, pred_fname, options.format, options.th,
-                      options.verbose, options.reranking_th, options.ignore_noanswer)
+                          options.verbose, options.reranking_th, options.ignore_noanswer)
     else:
         parser.print_help()
         sys.exit(1)
