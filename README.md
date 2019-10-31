@@ -8,6 +8,14 @@ python preprocess.py \
     --save_data=data/semeval/temp
 ```
 
+### word embedding
+```
+python embeddings_to_torch.py \
+    -emb_file_both "glove_dir/glove.6B.100d.txt" \
+    -dict_file "data/data.vocab.pt" \
+    -output_file "data/embeddings"
+```
+
 ### train
 ```
 python train.py \

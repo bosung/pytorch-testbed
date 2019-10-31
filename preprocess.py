@@ -70,16 +70,21 @@ def build_save_dataset(corpus_type, fields, src_reader, opt):
             else:
                 src_vocab = None
 
-        for i, src_shard in enumerate(src_shards):  # not considered shard
+        for i, _src_shard in enumerate(src_shards):  # not considered shard
             logger.info("Building shard %d." % i)
+            src_shard = []
+            for j, line in enumerate(_src_shard):
+                if len(line.strip().split("\t")) == 6:
+                    src_shard.append(line)
             _id = [line.strip().split("\t")[0] for line in src_shard[1:]]
-            sent1 = [line.strip().split("\t")[1] for line in src_shard[1:]]
-            sent2 = [line.strip().split("\t")[2] for line in src_shard[1:]]
+            # _id = [i for i, line in enumerate(src_shard[1:], 1)]
+            sent1 = [line.strip().split("\t")[3] for line in src_shard[1:]]
+            sent2 = [line.strip().split("\t")[4] for line in src_shard[1:]]
             prelogit1 = [0.0 for _ in src_shard[1:]]
             prelogit2 = [0.0 for _ in src_shard[1:]]
             label = []
             for line in src_shard[1:]:
-                token = line.strip().split("\t")[3]
+                token = line.strip().split("\t")[5]
                 if token in ["Good", "entailment", "1", 1]:
                     label.append(1)
                 else:

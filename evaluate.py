@@ -27,12 +27,13 @@ def main(opt):
 
     for i, src_shard in enumerate(src_shards):
         logger.info("Evaluating ...")
-        _id = [line.strip().split("\t")[0] for line in src_shard[1:]]
-        sent1 = [line.strip().split("\t")[1] for line in src_shard[1:]]
-        sent2 = [line.strip().split("\t")[2] for line in src_shard[1:]]
+        # _id = [line.strip().split("\t")[0] for line in src_shard[1:]]
+        _id = [i for i, line in enumerate(src_shard[1:], 1)]
+        sent1 = [line.strip().split("\t")[0] for line in src_shard[1:]]
+        sent2 = [line.strip().split("\t")[1] for line in src_shard[1:]]
         label = []
         for line in src_shard[1:]:
-            token = line.strip().split("\t")[3]
+            token = line.strip().split("\t")[2]
             if token in ["Good", "entailment", "1", 1]:
                 label.append(1)
             else:

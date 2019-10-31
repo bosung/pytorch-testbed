@@ -233,6 +233,11 @@ class QqpProcessor(DataProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
@@ -276,7 +281,7 @@ class QnliProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["entailment", "not_entailment"]
+        return ["not_entailment", "entailment"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -431,4 +436,82 @@ class SemevalProcessor(DataProcessor):
             if label == "PotentiallyUseful":
                 label = "Bad"
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+
+class QuacProcessor(DataProcessor):
+    """Processor for the QUAC data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv")),
+            "dev_matched")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["not_entailment", "entailment"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[1]
+            text_b = line[2]
+            label = line[-1]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+
+class DSTCProcessor(DataProcessor):
+    """Processor for the DSTC data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples("train", os.path.join(data_dir, "dstc8_train_eo_src.txt"),
+                                     os.path.join(data_dir, "dstc8_train_eo_tgt.txt"))
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples("dev", os.path.join(data_dir, "dstc8_dev_eo_src.txt"),
+                                     os.path.join(data_dir, "dstc8_dev_eo_tgt.txt"))
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, set_type, src, tgt):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        fs = open(src, "r", encoding="utf-8")
+        ft = open(tgt, "r", encoding="utf-8")
+
+        for s, t in zip(fs.readlines(), ft.readlines()):
+            dialog_id, ans_idx, candi_idx, candi_sent = t.split("__DELIM__")
+            guid = "%s-%s-%s" % (set_type, dialog_id, candi_idx)
+            text_a = s
+            text_b = candi_sent
+            label = "1" if ans_idx == candi_idx else "0"
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+
         return examples

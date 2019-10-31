@@ -30,18 +30,24 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
-from torch.nn import CrossEntropyLoss, MSELoss, Sigmoid, KLDivLoss, Softmax, LogSoftmax
+from torch.nn import CrossEntropyLoss, MSELoss, Sigmoid, KLDivLoss, Softmax, LogSoftmax, BCEWithLogitsLoss
 from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import matthews_corrcoef, f1_score
+from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore_support
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig
 from pytorch_pretrained_bert.tokenization import BertTokenizer
-from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
+# from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
+from pytorch_transformers.optimization import AdamW, WarmupLinearSchedule
 
-from data_processor import QnliProcessor, WikiQAProcessor, SemevalProcessor
+from data_processor import QnliProcessor, WikiQAProcessor, SemevalProcessor, QqpProcessor, QuacProcessor, DSTCProcessor
 from wikiqa_eval import wikiqa_eval
 from semeval_eval import semeval_eval
+from ploting import sampling_ploting, output_ploting
+
+from setproctitle import setproctitle
+
+setproctitle("(bosung) bert classifier")
 
 logger = logging.getLogger(__name__)
 nnSoftmax = Softmax(dim=0)
@@ -51,21 +57,21 @@ nnLogSoftmax = LogSoftmax(dim=0)
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, segment_ids, label_id, weight=0.01, logit0=0.0, logit1=0.0):
+    def __init__(self, input_ids, input_mask, segment_ids, label_id, weight=0.01, preprob0=0.0, preprob1=0.0):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
         self.label_id = label_id
         self.weight = weight
-        self.logit0 = logit0
-        self.logit1 = logit1
+        self.preprob0 = preprob0
+        self.preprob1 = preprob1
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
                                  tokenizer, output_mode, sep=False):
     """Loads a data file into a list of `InputBatch`s."""
 
-    label_map = {label : i for i, label in enumerate(label_list)}
+    label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
     features_by_label = [[] for _ in range(len(label_list))]  # [[label 0 data], [label 1 data] ... []]
@@ -140,29 +146,29 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
             logger.info("tokens: %s" % " ".join(
-                    [str(x) for x in tokens]))
+                [str(x) for x in tokens]))
             logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
             logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
             logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info("label: %s (id = %d)" % (example.label, label_id))
 
         features.append(
-                InputFeatures(input_ids=input_ids,
-                              input_mask=input_mask,
-                              segment_ids=segment_ids,
-                              label_id=label_id))
+            InputFeatures(input_ids=input_ids,
+                          input_mask=input_mask,
+                          segment_ids=segment_ids,
+                          label_id=label_id))
 
         features_by_label[label_id].append(
-                InputFeatures(input_ids=input_ids,
-                              input_mask=input_mask,
-                              segment_ids=segment_ids,
-                              label_id=label_id))
+            InputFeatures(input_ids=input_ids,
+                          input_mask=input_mask,
+                          segment_ids=segment_ids,
+                          label_id=label_id))
 
     if sep is False:
         return features
     else:
-        assert len(features) == (len(features_by_label[0])+len(features_by_label[1]))
+        assert len(features) == (len(features_by_label[0]) + len(features_by_label[1]))
         logger.info(" total:  %d\tlabel 0: %d\tlabel 1: %d " % (
             len(features), len(features_by_label[0]), len(features_by_label[1])))
         return features, features_by_label
@@ -199,6 +205,18 @@ def acc_and_f1(preds, labels):
     }
 
 
+def acc_precision_recall_f1(preds, labels):
+    acc = simple_accuracy(preds, labels)
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true=labels, y_pred=preds)
+    return {
+        "acc": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "acc_and_f1": (acc + f1) / 2,
+    }
+
+
 def pearson_and_spearman(preds, labels):
     pearson_corr = pearsonr(preds, labels)[0]
     spearman_corr = spearmanr(preds, labels)[0]
@@ -225,7 +243,7 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "mnli-mm":
         return {"acc": simple_accuracy(preds, labels)}
-    elif task_name == "qnli":
+    elif task_name == "squad":
         return acc_and_f1(preds, labels)
     elif task_name == "rte":
         return {"acc": simple_accuracy(preds, labels)}
@@ -233,6 +251,10 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "semeval":
         return acc_and_f1(preds, labels)
+    elif task_name == "quac":
+        return acc_precision_recall_f1(preds, labels)
+    elif task_name == "dstc":
+        return acc_precision_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -247,8 +269,10 @@ def model_tokenizer_loader(args, num_labels, pre_trained=False):
             model = BertForSequenceClassification.from_pretrained(args.output_dir, num_labels=num_labels)
             tokenizer = BertTokenizer.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         else:
-            cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
-            model = BertForSequenceClassification.from_pretrained(args.model_name, cache_dir=cache_dir, num_labels=num_labels)
+            cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE),
+                                                                           'distributed_{}'.format(args.local_rank))
+            model = BertForSequenceClassification.from_pretrained(args.model_name, cache_dir=cache_dir,
+                                                                  num_labels=num_labels)
             tokenizer = BertTokenizer.from_pretrained(args.model_name, do_lower_case=args.do_lower_case)
 
     return model, tokenizer
@@ -266,8 +290,8 @@ def main():
     parser.add_argument("--model_name", default=None, type=str, required=True)
     parser.add_argument("--bert_model", default=None, type=str, required=False,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
-                        "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
-                        "bert-base-multilingual-cased, bert-base-chinese.")
+                             "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
+                             "bert-base-multilingual-cased, bert-base-chinese.")
     parser.add_argument("--task_name",
                         default=None,
                         type=str,
@@ -304,7 +328,7 @@ def main():
                         type=int,
                         help="Total batch size for training.")
     parser.add_argument("--eval_batch_size",
-                        default=8,
+                        default=32,
                         type=int,
                         help="Total batch size for eval.")
     parser.add_argument("--learning_rate",
@@ -346,7 +370,11 @@ def main():
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--do_sampling', type=bool, default=False)
+    parser.add_argument('--do_gsampling', type=bool, default=False)
     parser.add_argument('--do_histloss', type=bool, default=False)
+    parser.add_argument('--debug', type=bool, default=False)
+    parser.add_argument('--JSD_rg', type=bool, default=False)
+    parser.add_argument('--mu_rg', type=bool, default=False)
     # parser.add_argument('--sampling_size', type=int, default=5000)
     parser.add_argument('--major_spl_size', type=int, default=0, help="sampling size for major class")
     parser.add_argument('--minor_cls_size', type=int, default=0, help="size of minor class")
@@ -367,12 +395,14 @@ def main():
         # "mrpc": MrpcProcessor,
         # "sst-2": Sst2Processor,
         # "sts-b": StsbProcessor,
-        # "qqp": QqpProcessor,
-        "qnli": QnliProcessor,
+        "qqp": QqpProcessor,
+        "squad": QnliProcessor,
         # "rte": RteProcessor,
         # "wnli": WnliProcessor,
         "wikiqa": WikiQAProcessor,
         "semeval": SemevalProcessor,
+        "quac": QuacProcessor,
+        "dstc": DSTCProcessor,
     }
 
     output_modes = {
@@ -382,11 +412,13 @@ def main():
         "sst-2": "classification",
         "sts-b": "regression",
         "qqp": "classification",
-        "qnli": "classification",
+        "squad": "classification",
         "rte": "classification",
         "wnli": "classification",
         "wikiqa": "classification",
         "semeval": "classification",
+        "quac": "classification",
+        "dstc": "classification",
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -399,16 +431,16 @@ def main():
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.distributed.init_process_group(backend='nccl')
 
-    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                        datefmt = '%m/%d/%Y %H:%M:%S',
-                        level = logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
 
     logger.info("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
         device, n_gpu, bool(args.local_rank != -1), args.fp16))
 
     if args.gradient_accumulation_steps < 1:
         raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-                            args.gradient_accumulation_steps))
+            args.gradient_accumulation_steps))
 
     args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
 
@@ -429,7 +461,7 @@ def main():
     task_name = args.task_name.lower()
 
     if task_name not in processors:
-        raise ValueError("Task not found: %s" % (task_name))
+        raise ValueError("Task not found: %s" % task_name)
 
     processor = processors[task_name]()
     output_mode = output_modes[task_name]
@@ -439,10 +471,7 @@ def main():
 
     if args.do_train:
         # Prepare model
-        cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
-        # model = BertForSequenceClassification.from_pretrained(args.bert_model, cache_dir=cache_dir, num_labels=num_labels)
         model, tokenizer = model_tokenizer_loader(args, num_labels=num_labels)
-        # tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
         if args.fp16:
             model.half()
@@ -451,26 +480,40 @@ def main():
             try:
                 from apex.parallel import DistributedDataParallel as DDP
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
             model = DDP(model)
         elif n_gpu > 1:
             model = torch.nn.DataParallel(model)
 
         # Prepare data loader
-        train_examples = processor.get_train_examples(args.data_dir)
+        # train_examples = processor.get_train_examples(args.data_dir)
+        dev_examples = processor.get_dev_examples(args.data_dir)
 
         features_by_label = ""
-        if args.do_sampling is True:  # for num_train_optimization step
-            train_steps_per_ep = math.ceil((args.major_spl_size + args.minor_cls_size) / args.train_batch_size)  # ceiling
+        if args.do_sampling or args.do_gsampling is True:  # for num_train_optimization step
+            train_steps_per_ep = math.ceil(
+                (args.major_spl_size + args.minor_cls_size) / args.train_batch_size)  # ceiling
+            train_examples = processor.get_train_examples(args.data_dir)
             train_features, features_by_label = convert_examples_to_features(
                 train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
             num_train_examples = args.major_spl_size + args.minor_cls_size
         else:
-            train_features = convert_examples_to_features(
-                train_examples, label_list, args.max_seq_length, tokenizer, output_mode)
-            train_data, all_label_ids = get_tensor_dataset(train_features, output_mode)
-            num_train_examples = len(train_examples)
+            # FIXME
+            if os.path.exists(os.path.join(args.data_dir, 'train.pt')):
+                train_data = torch.load(os.path.join(args.data_dir, 'train.pt'))
+                # all_label_ids = torch.load(os.path.join(args.data_dir, 'train_labels.pt'))
+            else:
+                train_examples = processor.get_train_examples(args.data_dir)
+                train_features, features_by_label = convert_examples_to_features(
+                    train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
+                train_data, _ = get_tensor_dataset(train_features, output_mode)
+                torch.save(train_data, os.path.join(args.data_dir, 'train.pt'))
+                # torch.save(all_label_ids, os.path.join(args.data_dir, 'train_labels.pt'))
+                logger.info("train data tensors saved !")
+
+            num_train_examples = len(train_data)
             if args.local_rank == -1:
                 _train_sampler = RandomSampler(train_data)
             else:
@@ -479,10 +522,17 @@ def main():
             train_steps_per_ep = len(train_dataloader)
 
         # Prepare data for devset
-        dev_examples = processor.get_dev_examples(args.data_dir)
-        dev_features = convert_examples_to_features(
-            dev_examples, label_list, args.max_seq_length, tokenizer, output_mode)
-        dev_data, all_dev_label_ids = get_tensor_dataset(dev_features, output_mode)
+        if os.path.exists(os.path.join(args.data_dir, 'dev.pt')):
+            dev_data = torch.load(os.path.join(args.data_dir, 'dev.pt'))
+            all_dev_label_ids = torch.load(os.path.join(args.data_dir, 'dev_labels.pt'))
+        else:
+            # dev_examples = processor.get_dev_examples(args.data_dir)
+            dev_features = convert_examples_to_features(
+                dev_examples, label_list, args.max_seq_length, tokenizer, output_mode)
+            dev_data, all_dev_label_ids = get_tensor_dataset(dev_features, output_mode)
+            torch.save(dev_data, os.path.join(args.data_dir, 'dev.pt'))
+            torch.save(all_dev_label_ids, os.path.join(args.data_dir, 'dev_labels.pt'))
+            logger.info("dev data tensors saved !")
 
         num_train_optimization_steps = train_steps_per_ep // args.gradient_accumulation_steps * args.num_train_epochs
         if args.local_rank != -1:
@@ -495,39 +545,20 @@ def main():
         optimizer_grouped_parameters = [
             {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-            ]
+        ]
 
         # loss weight for historical objective function
         loss_weight = torch.nn.Parameter(torch.tensor([0.5], dtype=torch.float).to(device))
 
         optimizer_grouped_parameters[0]['params'].append(loss_weight)
-
-        if args.fp16:
-            try:
-                from apex.optimizers import FP16_Optimizer
-                from apex.optimizers import FusedAdam
-            except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
-
-            optimizer = FusedAdam(optimizer_grouped_parameters,
-                                  lr=args.learning_rate,
-                                  bias_correction=False,
-                                  max_grad_norm=1.0)
-            if args.loss_scale == 0:
-                optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
-            else:
-                optimizer = FP16_Optimizer(optimizer, static_loss_scale=args.loss_scale)
-            warmup_linear = WarmupLinearSchedule(warmup=args.warmup_proportion,
-                                                 t_total=num_train_optimization_steps)
-
-        else:
-            optimizer = BertAdam(optimizer_grouped_parameters,
-                                 lr=args.learning_rate,
-                                 warmup=args.warmup_proportion,
-                                 t_total=num_train_optimization_steps)
+        optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+        # optimizer_grouped_parameters2 = [
+        #     {'params': [p for n, p in param_optimizer if n in ["classifier.weight", "classifier.bias"]],
+        #      'weight_decay': 0.01}
+        # ]
+        # optimizer2 = AdamW(optimizer_grouped_parameters2, lr=args.learning_rate)
 
         global_step = 0
-        nb_tr_steps = 0
         tr_loss = 0
 
         logger.info("***** Running training *****")
@@ -536,86 +567,110 @@ def main():
         logger.info("  Num steps = %d", num_train_optimization_steps)
 
         model.train()
-        for ep in range(1, int(args.num_train_epochs)+1):
-            tr_loss = 0
-            nb_tr_examples, nb_tr_steps = 0, 0
+        pre_loss_sum, n_examples = 0, 0
+        dev_results = []
+        for ep in range(1, int(args.num_train_epochs) + 1):
+            nb_tr_examples = 0
 
             if args.do_sampling is True:
-                logger.info("***** [epoch %d] (sampling) get new dataloader ... *****" % ep)
+                logger.info(" [epoch %d] (sampling) get new dataloader ... " % ep)
                 train_dataloader = get_sampling_dataloader(args, features_by_label)
 
-            if args.do_histloss is True and ep > 1:
-                train_data, _ = get_tensor_dataset(train_features, output_mode)
-                if args.local_rank == -1:
-                    _train_sampler = RandomSampler(train_data)
-                else:
-                    _train_sampler = DistributedSampler(train_data)
-                train_dataloader = DataLoader(train_data, sampler=_train_sampler, batch_size=args.train_batch_size)
+            if args.do_gsampling is True:
+                # pre_loss = pre_loss_sum / n_examples if n_examples > 0 else 0
+                pre_loss = pre_loss_sum
+                logger.info(" [epoch %d] (gated-sampling) get new dataloader ... " % ep)
+                train_dataloader = get_gated_sampling_dataloader(device, ep, args, features_by_label, pre_loss=pre_loss)
 
-            logger.info("***** [epoch %d] trainig iteration starts ... *****" % ep)
+            logger.info(" [epoch %d] trainig iteration starts ... *****" % ep)
+            pre_loss_sum = 0
+            n_pos, n_neg = 0, 0
+            label0_t_prob = []
+            label1_t_prob = []
+            t_prob = []
             for step, batch in enumerate(train_dataloader):
                 batch = tuple(t.to(device) for t in batch)
-                input_ids, input_mask, segment_ids, label_ids, logit0, logit1 = batch
-
+                input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                label_mask = (label_ids == 0)
                 # define a new function to compute loss values for both output_modes
                 logits = model(input_ids, segment_ids, input_mask, labels=None)
 
-                if output_mode == "classification":
-                    loss_fct = CrossEntropyLoss()
-                    loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
+                loss_fct = CrossEntropyLoss(reduction='none')
+                _loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
+                loss = _loss.mean()  # default = 'mean'
+                # loss_no_red = CrossEntropyLoss(reduction='none')(logits.view(-1, num_labels), label_ids.view(-1))
+                # pre_loss_sum += loss_no_red.sum().item()
 
-                    if args.do_histloss is True and ep > 1:
-                        # loss_weight = loss_weight.clamp(0, 1)
-                        pre_logit = torch.cat([logit0.unsqueeze(1), logit1.unsqueeze(1)], dim=1)
-                        loss_pre = loss_fct(pre_logit.view(-1, num_labels), label_ids.view(-1))
-                        pre_dist = nnSoftmax(pre_logit)[:, 1]
-                        cur_dist = nnLogSoftmax(logits)[:, 1]
-                        loss_gap = KLDivLoss()(cur_dist, pre_dist)
-                        loss_weight = Sigmoid()(3 * (1 - loss_pre))  # 3 is magic number..
-                        loss = loss_weight.item()*loss + (1-loss_weight.item())*(loss_pre + 10 * loss_gap)  # 10 is magic number ...
-
-                elif output_mode == "regression":
-                    loss_fct = MSELoss()
-                    loss = loss_fct(logits.view(-1), label_ids.view(-1))
+                if args.debug is True or args.JSD_rg is True or args.mu_rg is True:
+                    label0_loss = _loss[label_mask]
+                    label1_loss = _loss[~label_mask]
+                    n_neg += label0_loss.size(0)
+                    n_pos += label1_loss.size(0)
+                    label0_logits = Softmax(dim=1)(logits[label_mask])[:, 1]
+                    label1_logits = Softmax(dim=1)(logits[~label_mask])[:, 1]
+                    label0_t_prob.extend(label0_logits.tolist())
+                    label1_t_prob.extend(label1_logits.tolist())
+                    probs = Softmax(dim=1)(logits)[:, 1]
+                    t_prob.extend(probs.tolist())
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
 
-                if args.fp16:
-                    optimizer.backward(loss)
-                else:
-                    loss.backward()
-
                 tr_loss += loss.item()
                 nb_tr_examples += input_ids.size(0)
-                nb_tr_steps += 1
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16:
-                        # modify learning rate with special warm up BERT uses
-                        # if args.fp16 is False, BertAdam is used that handles this automatically
-                        lr_this_step = args.learning_rate * warmup_linear.get_lr(global_step, args.warmup_proportion)
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = lr_this_step
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    global_step += 1
+                global_step += 1
+
+                # experiment: minimize the difference between two classes
+                if args.JSD_rg is True and label1_loss.size(0) > 1:  # exclude the case only negatives in mini-batch.
+                    KLD1 = KL_loss(label1_logits, label0_logits)
+                    KLD2 = KL_loss(label0_logits, label1_logits)
+                    # logger.info("KLD1: %.6f, KLD2: %.6f, (KLD1+KLD2)/2: %.6f" % (KLD1, KLD2, (KLD1+KLD2)*0.5))
+                    if KLD1 < 10 and KLD2 < 10:
+                        loss = loss + 0.0005 * 0.5 * (KLD1 + KLD2)
+                if args.mu_rg is True:
+                    mu = probs.mean()
+                    loss = loss + 0.005 * 0.5 * (mu - 0.5) * (mu - 0.5)
+
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+
             # end of epoch
+            if args.JSD_rg is True:
+                logger.info("Jensen-Shannon Divergence Regularization applied")
+            if args.mu_rg is True:
+                logger.info("Mean Divergence Regularization applied")
+            if args.debug is True:
+                assert len(label0_t_prob) == n_neg
+                assert len(label1_t_prob) == n_pos
+                logger.info("prob mean: %.6f, var: %.6f" %
+                            (torch.tensor(t_prob).mean().item(),
+                             torch.tensor(t_prob).var().item()))
+                logger.info("          label 0 | label 1")
+                logger.info("prob mean: %.6f  |  %.6f" %
+                            (torch.tensor(label0_t_prob).mean().item(),
+                             torch.tensor(label1_t_prob).mean().item()))
+                logger.info("     var: %.6f  |  %.6f" %
+                            (torch.tensor(label0_t_prob).var().item(),
+                             torch.tensor(label1_t_prob).var().item()))
+                # sampling_ploting(t_prob, ep)
+                output_ploting(label0_t_prob, label1_t_prob, ep)
+
             ##########################################################################
             # update weight in sampling experiments
-            if args.do_sampling is True or args.do_histloss is True:
-                logger.info("***** [epoch %d] update logits ... *****" % ep)
-                train_features, features_by_label = update_logit(train_features, model, device)
-            if args.do_histloss is True:
-                logger.info("***** [epoch %d] (HOF) loss weight %.4f %.4f *****" % (ep, loss_weight.item(), 1-loss_weight.item()))
+            if args.do_sampling is True or args.do_gsampling is True:
+                logger.info(" [epoch %d] update pre probs ... " % ep)
+                train_features, features_by_label = update_probs(train_features, model, device)
             ##########################################################################
             # eval with dev set.
             dev_sampler = SequentialSampler(dev_data)
             if task_name == 'wikiqa':
                 dev_dataloader = DataLoader(dev_data, sampler=dev_sampler, batch_size=1)
-                score = wikiqa_eval(ep, device, dev_examples, dev_dataloader, model, logger)
+                score, log = wikiqa_eval(ep, device, dev_examples, dev_dataloader, model, logger)
                 score = str(round(score, 4))
+                dev_results.append(log)
             elif task_name == 'semeval':
                 dev_dataloader = DataLoader(dev_data, sampler=dev_sampler, batch_size=1)
                 score = semeval_eval(ep, device, dev_examples, dev_dataloader, model, logger, _type="dev")
@@ -628,7 +683,7 @@ def main():
                 nb_dev_steps = 0
                 preds = []
 
-                logger.info("***** [epoch %d] devset evaluating ... *****" % ep)
+                logger.info(" [epoch %d] devset evaluating ... " % ep)
                 for batch in dev_dataloader:
                     # input_ids, input_mask, segment_ids, label_ids, _, _ = batch
                     input_ids = batch[0].to(device)
@@ -662,21 +717,27 @@ def main():
                 elif output_mode == "regression":
                     preds = np.squeeze(preds)
                 result = compute_metrics(task_name, preds, all_dev_label_ids.numpy())
-                loss = tr_loss/global_step if args.do_train else None
+                loss = tr_loss / global_step if args.do_train else None
 
                 result['dev_loss'] = dev_loss
                 result['loss'] = loss
-                logger.info("***** [epoch %d] devset eval results *****" % ep)
+                logger.info(" [epoch %d] devset eval results " % ep)
                 for key in sorted(result.keys()):
                     logger.info("  %s = %s", key, str(result[key]))
 
-                if task_name == "qnli":
+                if task_name == "squad":
                     score = str(round(result['f1'], 4))
+                elif task_name == "quac" or task_name == "dstc":
+                    score = str(round(result['f1'][1], 4))
                 else:
                     score = str(round(result['acc'], 4))
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_model_file = os.path.join(args.output_dir, 'pytorch_model_%d_%s.bin' % (ep, score))
             torch.save(model_to_save.state_dict(), output_model_file)
+
+        # end of whole training
+        for result in dev_results:
+            print(result)
 
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         # Save a trained model, configuration and tokenizer
@@ -691,13 +752,6 @@ def main():
 
         if args.model_name.split("-")[0] == 'bert':
             tokenizer.save_vocabulary(args.output_dir)
-
-        # Load a trained model and vocabulary that you have fine-tuned
-        # model = BertForSequenceClassification.from_pretrained(args.output_dir, num_labels=num_labels)
-        # tokenizer = BertTokenizer.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
-    # else:
-    #     model = BertForSequenceClassification.from_pretrained(args.bert_model, num_labels=num_labels)
-    # model.to(device)
 
     if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         # Load a trained model and vocabulary that you have fine-tuned
@@ -764,7 +818,7 @@ def main():
             elif output_mode == "regression":
                 preds = np.squeeze(preds)
             result = compute_metrics(task_name, preds, all_label_ids.numpy())
-            loss = tr_loss/global_step if args.do_train else None
+            loss = tr_loss / global_step if args.do_train else None
 
             result['eval_loss'] = eval_loss
             # result['global_step'] = global_step
@@ -816,10 +870,10 @@ def main():
 
                 with torch.no_grad():
                     logits = model(input_ids, segment_ids, input_mask, labels=None)
-            
+
                 loss_fct = CrossEntropyLoss()
                 tmp_eval_loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
-            
+
                 eval_loss += tmp_eval_loss.mean().item()
                 nb_eval_steps += 1
                 if len(preds) == 0:
@@ -832,7 +886,7 @@ def main():
             preds = preds[0]
             preds = np.argmax(preds, axis=1)
             result = compute_metrics(task_name, preds, all_label_ids.numpy())
-            loss = tr_loss/global_step if args.do_train else None
+            loss = tr_loss / global_step if args.do_train else None
 
             result['eval_loss'] = eval_loss
             result['global_step'] = global_step
@@ -846,7 +900,10 @@ def main():
                     writer.write("%s = %s\n" % (key, str(result[key])))
 
 
-def update_logit(train_features, model, device):
+def update_probs(train_features, model, device):
+    def func(x):
+        return 4 * (-(x * x) + x)
+
     train_data, _ = get_tensor_dataset(train_features, "classification")
     loader = DataLoader(train_data, sampler=SequentialSampler(train_data), batch_size=1024)
     global_logit_idx = 0
@@ -857,14 +914,16 @@ def update_logit(train_features, model, device):
         with torch.no_grad():
             logits = model(input_ids, segment_ids, input_mask, labels=None)
 
+        probs = Softmax(dim=-1)(logits)
         batch_size = logits.size(0)
         for i in range(batch_size):
-            train_features[global_logit_idx+i].logit0 = logits[i][0].item()
-            train_features[global_logit_idx+i].logit1 = logits[i][1].item()
+            train_features[global_logit_idx + i].preprob0 = probs[i][0].item()
+            train_features[global_logit_idx + i].preprob1 = probs[i][1].item()
             if label_ids[i] == 0:
-                train_features[global_logit_idx+i].weight = logits[i][1].item()
+                train_features[global_logit_idx + i].weight = probs[i][1].item()
             else:  # label_ids[i] == 1
-                train_features[global_logit_idx+i].weight = logits[i][0].item()
+                train_features[global_logit_idx + i].weight = probs[i][0].item()
+            # train_features[global_logit_idx+i].weight = func(probs[i][1].item())
         global_logit_idx += batch_size
 
     assert global_logit_idx == len(train_data)
@@ -879,19 +938,75 @@ def update_logit(train_features, model, device):
 
 
 def softmax(x):
-    return np.exp(x)/sum(np.exp(x))
+    return np.exp(x) / sum(np.exp(x))
 
 
 def get_sampling_dataloader(args, features_by_label):
     weight0 = softmax([i.weight for i in features_by_label[0]])
     weight1 = softmax([i.weight for i in features_by_label[1]])
     if len(features_by_label[0]) > len(features_by_label[1]):
+        # weighted sampling
         label_0 = np.random.choice(features_by_label[0], args.major_spl_size, replace=False, p=weight0)
         label_1 = np.random.choice(features_by_label[1], args.minor_cls_size, replace=False, p=weight1)
+        # random sampling
+        # label_0 = np.random.choice(features_by_label[0], args.major_spl_size, replace=False)
+        # label_1 = np.random.choice(features_by_label[1], args.minor_cls_size, replace=False)
     else:
+        # weighted sampling
         label_0 = np.random.choice(features_by_label[0], args.minor_cls_size, replace=False, p=weight0)
         label_1 = np.random.choice(features_by_label[1], args.major_spl_size, replace=False, p=weight1)
+        # random sampling
+        # label_0 = np.random.choice(features_by_label[0], args.minor_cls_size, replace=False)
+        # label_1 = np.random.choice(features_by_label[1], args.major_spl_size, replace=False)
     total = np.concatenate((label_0, label_1))
+    train_data, _ = get_tensor_dataset(total, "classification")
+    train_sampler = RandomSampler(train_data)
+    train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
+    return train_dataloader
+
+
+def get_gated_sampling_dataloader(device, ep, args, features_by_label, pre_loss=0):
+    threshold = 0.5
+    if ep == 1:
+        label_0 = np.random.choice(features_by_label[0], args.minor_cls_size, replace=False)
+        logger.info(" gated-sampling result: th: %.2f, neg: %d, pos: %d" %
+                    (threshold, len(label_0), len(features_by_label[1])))
+        total = np.concatenate((label_0, features_by_label[1]))
+    else:
+        while True:
+            label_0_hard, label_0_easy = [], []
+            for x in features_by_label[0]:
+                if x.preprob0 <= threshold:
+                    label_0_hard.append(x)
+                else:
+                    label_0_easy.append(x)
+            logits = torch.tensor([[x.preprob0, x.preprob1] for x in label_0_hard], dtype=torch.float).to(device)
+            labels = torch.tensor([0] * len(label_0_hard), dtype=torch.long).to(device)
+            # score = np.sum(-np.log(np.array([x.preprob0 for x in label_0_hard])))
+            score = CrossEntropyLoss(reduction='sum')(logits, labels).item()
+            if (score > pre_loss or abs(score - pre_loss) < pre_loss * 0.1) and len(label_0_hard) > args.minor_cls_size:
+                break
+            else:
+                threshold += 0.02
+                if threshold >= 1:
+                    break
+
+        logger.info(" gated-sampling result: th: %.2f, neg: %d, pos: %d" %
+                    (threshold, len(label_0_hard), len(features_by_label[1])))
+        n_easy_sample = math.ceil(len(label_0_hard) * 0.1)
+        if len(label_0_easy) > n_easy_sample:
+            label_0_easy = np.random.choice(label_0_easy, math.ceil(len(label_0_hard) * 0.1))
+            logger.info(" add noisy (easy) samples 10 percents of %d = %d" %
+                        (len(label_0_hard), int(math.ceil(len(label_0_hard) * 0.1))))
+            total = np.concatenate((label_0_hard, label_0_easy, features_by_label[1]))
+            logger.info(" total sampling size (%d + %d + %d ) = %d" %
+                        (len(label_0_hard), len(label_0_easy), len(features_by_label[1]), len(total)))
+        else:
+            logger.info(" No EASY samples!")
+            total = np.concatenate((label_0_hard, features_by_label[1]))
+            logger.info(" total sampling size (%d + %d) = %d" %
+                        (len(label_0_hard), len(features_by_label[1]), len(total)))
+
     train_data, _ = get_tensor_dataset(total, "classification")
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
@@ -906,10 +1021,17 @@ def get_tensor_dataset(features, output_mode):
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
-    all_logit0 = torch.tensor([f.logit0 for f in features], dtype=torch.float)
-    all_logit1 = torch.tensor([f.logit1 for f in features], dtype=torch.float)
-    train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_logit0, all_logit1)
+    all_preprob0 = torch.tensor([f.preprob0 for f in features], dtype=torch.float)
+    all_preprob1 = torch.tensor([f.preprob1 for f in features], dtype=torch.float)
+    train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_preprob0,
+                               all_preprob1)
     return train_data, all_label_ids
+
+
+def KL_loss(p, q):
+    var1 = p.var()
+    var2 = q.var()
+    return 0.5 * (torch.log(var2 / var1) + (var1 / var2) - 1)
 
 
 if __name__ == "__main__":
