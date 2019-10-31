@@ -557,8 +557,15 @@ class OrderedIterator(torchtext.data.Iterator):
                 logger.info("Sampling Test")
                 pos = [x for x in self.dataset if x.label == 1]
                 neg = [x for x in self.dataset if x.label == 0]
-                neg_weight = softmax([x.prelogit2 for x in self.dataset if x.label == 0])
-                sampled = np.random.choice(neg, self.sampling_size, p=neg_weight)
+                # neg_weight = softmax([x.prelogit2 for x in self.dataset if x.label == 0])
+                # sampled = np.random.choice(neg, self.sampling_size, p=neg_weight, replace=False)
+                neg_weight = torch.tensor([x.prelogit2 for x in self.dataset if x.label == 0])
+                if neg_weight.sum().item() == 0:  # epoch = 1
+                    sampled = np.random.choice(neg, self.sampling_size, replace=False)
+                else:
+                    threshold = 0.5
+                    mask = neg_weight > threshold
+                    sampled = (neg_weight * mask).squeeze()
                 _data = pos + sampled.tolist()
                 logger.info("Sample negative data. pos %d, neg %d" % (
                     len(pos), len(sampled)

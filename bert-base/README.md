@@ -10,13 +10,6 @@ python run_classifier.py \
     --output_dir=qnli-hof \
     --do_train \
     --num_train_epoch=7 \
-    --do_histloss=True \
-#    --do_sampling=True \
-#    --minor_cls_size=124769 \
-#    --major_spl_size=124769 \
-#    --do_histloss=True \
-#    --seed=10
-##    --major_spl_size=249538 \
 ```
 
 ### run WikiQA
@@ -26,14 +19,8 @@ python run_classifier.py \
     --data_dir=data/WikiQA/ \
     --bert_model=bert-base-cased \
     --output_dir=wikiqa-dwsx2 \
-    --do_eval
-#    --do_train \
-#    --num_train_epoch=10 \
-#    --do_histloss=True \
-#    --do_sampling=True \
-#    --minor_cls_size=1040 \
-#    --major_spl_size=5200 \
-#    --seed=10
+    --do_train \
+    --num_train_epoch=10
 ```
 
 ### run SemEval2017

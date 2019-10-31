@@ -40,11 +40,12 @@ class CLSModel(nn.Module):
         enc_state, memory_bank2, lengths = self.encoder(sent2[0])
 
         # rnn max pooling
-        # sent1_emb = memory_bank1.max(dim=0)[0]
-        # sent2_emb = memory_bank2.max(dim=0)[0]
+        sent1_emb = memory_bank1.max(dim=0)[0]
+        sent2_emb = memory_bank2.max(dim=0)[0]
+
         # cnn max pooling
-        sent1_emb = memory_bank1.max(dim=-1)[0].transpose(0, 1)
-        sent2_emb = memory_bank2.max(dim=-1)[0].transpose(0, 1)
+        # sent1_emb = memory_bank1.max(dim=-1)[0].transpose(0, 1)
+        # sent2_emb = memory_bank2.max(dim=-1)[0].transpose(0, 1)
         cls_input = torch.cat([sent1_emb, sent2_emb,
                                torch.abs(sent1_emb - sent2_emb),
                                sent1_emb * sent2_emb], dim=1)

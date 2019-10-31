@@ -16,6 +16,7 @@ import traceback
 
 import onmt.utils
 from onmt.utils.logging import logger
+from torch.utils.data.dataset import TensorDataset
 
 
 def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
@@ -280,6 +281,14 @@ class Trainer(object):
 
             if train_steps > 0 and step >= train_steps:
                 break
+
+        # if weighted sampling
+        preprob1 = [x.prelogit1 for x in batches]
+        preprob2 = [x.prelogit2 for x in batches]
+        preprob1 = torch.tensor(preprob1)
+        preprob2 = torch.tensor(preprob2)
+        preprobs = TensorDataset(preprob1, preprob2)
+        torch.save(preprobs, "preprob.pt")
 
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
