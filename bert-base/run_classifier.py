@@ -37,13 +37,13 @@ from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig
 from pytorch_pretrained_bert.tokenization import BertTokenizer
-# from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 from pytorch_transformers.optimization import AdamW, WarmupLinearSchedule
 
-from data_processor import QnliProcessor, WikiQAProcessor, SemevalProcessor, QqpProcessor, QuacProcessor, DSTCProcessor
+from data_processor import QnliProcessor, WikiQAProcessor, SemevalProcessor, QqpProcessor, QuacProcessor, DSTCProcessor, UbuntuProcessor
 from wikiqa_eval import wikiqa_eval
 from semeval_eval import semeval_eval
-from ploting import sampling_ploting, output_ploting
+from ranking_eval import ranking_eval
+# from ploting import sampling_ploting, output_ploting
 
 from setproctitle import setproctitle
 
@@ -208,13 +208,35 @@ def acc_and_f1(preds, labels):
 def acc_precision_recall_f1(preds, labels):
     acc = simple_accuracy(preds, labels)
     precision, recall, f1, _ = precision_recall_fscore_support(y_true=labels, y_pred=preds)
-    return {
+    results = {
         "acc": acc,
         "precision": precision,
         "recall": recall,
         "f1": f1,
         "acc_and_f1": (acc + f1) / 2,
     }
+    return results
+
+
+def ranking_metric(preds, labels, logits, ids):
+    acc = simple_accuracy(preds, labels)
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true=labels, y_pred=preds)
+    results = {
+        "acc": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "acc_and_f1": (acc + f1) / 2,
+    }
+    if ids is None:
+        return results
+    else:
+        r1, r10, r50, mrr = ranking_eval(labels, logits, ids)
+        results['R@1'] = r1
+        results['R@10'] = r10
+        results['R@50'] = r50
+        results['MRR'] = mrr
+        return results
 
 
 def pearson_and_spearman(preds, labels):
@@ -227,7 +249,7 @@ def pearson_and_spearman(preds, labels):
     }
 
 
-def compute_metrics(task_name, preds, labels):
+def compute_metrics(task_name, preds, labels, logits=None, ids=None):
     assert len(preds) == len(labels)
     if task_name == "cola":
         return {"mcc": matthews_corrcoef(labels, preds)}
@@ -254,7 +276,9 @@ def compute_metrics(task_name, preds, labels):
     elif task_name == "quac":
         return acc_precision_recall_f1(preds, labels)
     elif task_name == "dstc":
-        return acc_precision_recall_f1(preds, labels)
+        return acc_precision_recall_f1(preds, labels, ids)
+    elif task_name == "ubuntu":
+        return ranking_metric(preds, labels, logits, ids)
     else:
         raise KeyError(task_name)
 
@@ -403,6 +427,7 @@ def main():
         "semeval": SemevalProcessor,
         "quac": QuacProcessor,
         "dstc": DSTCProcessor,
+        "ubuntu": UbuntuProcessor,
     }
 
     output_modes = {
@@ -419,6 +444,7 @@ def main():
         "semeval": "classification",
         "quac": "classification",
         "dstc": "classification",
+        "ubuntu": "classification",
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -490,6 +516,7 @@ def main():
         # Prepare data loader
         # train_examples = processor.get_train_examples(args.data_dir)
         dev_examples = processor.get_dev_examples(args.data_dir)
+        dev_ids = [e.guid for e in dev_examples]
 
         features_by_label = ""
         if args.do_sampling or args.do_gsampling is True:  # for num_train_optimization step
@@ -637,6 +664,8 @@ def main():
                 optimizer.step()
                 optimizer.zero_grad()
 
+                break
+
             # end of epoch
             if args.JSD_rg is True:
                 logger.info("Jensen-Shannon Divergence Regularization applied")
@@ -707,8 +736,7 @@ def main():
                     if len(preds) == 0:
                         preds.append(logits.detach().cpu().numpy())
                     else:
-                        preds[0] = np.append(
-                            preds[0], logits.detach().cpu().numpy(), axis=0)
+                        preds[0] = np.append(preds[0], logits.detach().cpu().numpy(), axis=0)
 
                 dev_loss = dev_loss / nb_dev_steps
                 preds = preds[0]
@@ -716,7 +744,8 @@ def main():
                     preds = np.argmax(preds, axis=1)
                 elif output_mode == "regression":
                     preds = np.squeeze(preds)
-                result = compute_metrics(task_name, preds, all_dev_label_ids.numpy())
+                result = compute_metrics(task_name, preds, all_dev_label_ids.numpy(),
+                                         logits=logits.detach().cpu().numpy(), ids=dev_ids)
                 loss = tr_loss / global_step if args.do_train else None
 
                 result['dev_loss'] = dev_loss
@@ -727,7 +756,7 @@ def main():
 
                 if task_name == "squad":
                     score = str(round(result['f1'], 4))
-                elif task_name == "quac" or task_name == "dstc":
+                elif task_name == "quac" or task_name == "dstc" or task_name == 'ubuntu':
                     score = str(round(result['f1'][1], 4))
                 else:
                     score = str(round(result['acc'], 4))
