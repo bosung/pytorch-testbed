@@ -218,7 +218,7 @@ def acc_precision_recall_f1(preds, labels):
     return results
 
 
-def ranking_metric(preds, labels, logits, ids):
+def ranking_metric(preds, labels, probs, ids):
     acc = simple_accuracy(preds, labels)
     precision, recall, f1, _ = precision_recall_fscore_support(y_true=labels, y_pred=preds)
     results = {
@@ -231,7 +231,7 @@ def ranking_metric(preds, labels, logits, ids):
     if ids is None:
         return results
     else:
-        r1, r10, r50, mrr = ranking_eval(labels, logits, ids)
+        r1, r10, r50, mrr = ranking_eval(labels, probs, ids)
         results['R@1'] = r1
         results['R@10'] = r10
         results['R@50'] = r50
@@ -249,7 +249,7 @@ def pearson_and_spearman(preds, labels):
     }
 
 
-def compute_metrics(task_name, preds, labels, logits=None, ids=None):
+def compute_metrics(task_name, preds, labels, probs=None, ids=None):
     assert len(preds) == len(labels)
     if task_name == "cola":
         return {"mcc": matthews_corrcoef(labels, preds)}
@@ -278,7 +278,7 @@ def compute_metrics(task_name, preds, labels, logits=None, ids=None):
     elif task_name == "dstc":
         return acc_precision_recall_f1(preds, labels, ids)
     elif task_name == "ubuntu":
-        return ranking_metric(preds, labels, logits, ids)
+        return ranking_metric(preds, labels, probs, ids)
     else:
         raise KeyError(task_name)
 
@@ -664,8 +664,6 @@ def main():
                 optimizer.step()
                 optimizer.zero_grad()
 
-                break
-
             # end of epoch
             if args.JSD_rg is True:
                 logger.info("Jensen-Shannon Divergence Regularization applied")
@@ -711,6 +709,7 @@ def main():
                 dev_loss = 0
                 nb_dev_steps = 0
                 preds = []
+                probs = []
 
                 logger.info(" [epoch %d] devset evaluating ... " % ep)
                 for batch in dev_dataloader:
@@ -735,8 +734,10 @@ def main():
                     nb_dev_steps += 1
                     if len(preds) == 0:
                         preds.append(logits.detach().cpu().numpy())
+                        probs = Softmax(dim=1)(logits).tolist()
                     else:
                         preds[0] = np.append(preds[0], logits.detach().cpu().numpy(), axis=0)
+                        probs.extend(Softmax(dim=1)(logits).tolist())
 
                 dev_loss = dev_loss / nb_dev_steps
                 preds = preds[0]
@@ -745,7 +746,7 @@ def main():
                 elif output_mode == "regression":
                     preds = np.squeeze(preds)
                 result = compute_metrics(task_name, preds, all_dev_label_ids.numpy(),
-                                         logits=logits.detach().cpu().numpy(), ids=dev_ids)
+                                         probs=probs, ids=dev_ids)
                 loss = tr_loss / global_step if args.do_train else None
 
                 result['dev_loss'] = dev_loss

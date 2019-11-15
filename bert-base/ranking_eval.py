@@ -3,7 +3,7 @@ def sort_by_score(val):
     return val[1]
 
 
-def ranking_eval(labels, logits, ids):
+def ranking_eval(labels, probs, ids):
     n_exam = len(ids)
 
     t_mrr = 0
@@ -15,7 +15,7 @@ def ranking_eval(labels, logits, ids):
     for i, e in enumerate(ids):
         eid, rid = e.split("_")
         if pre_eid != eid:  # new example
-            assert len(temp) == 100  # candidates num
+            assert len(temp) == 100 or len(temp) == 10  # candidates num
             temp.sort(key=sort_by_score, reverse=True)
             for j, t in enumerate(temp, 1):
                 if t[2] == 1:  # if answer
@@ -27,10 +27,10 @@ def ranking_eval(labels, logits, ids):
                     if j <= 1:
                         t_r1 += 1
             temp = []
-        temp.append([rid, logits[i][1], labels[i]])
+        temp.append([rid, probs[i][1], labels[i]])
         pre_eid = eid
 
-    assert len(temp) == 100  # candidates num
+    assert len(temp) == 100 or len(temp) == 10  # candidates num
     temp.sort(key=sort_by_score, reverse=True)
     for j, t in enumerate(temp, 1):
         if t[2] == 1:  # if answer
