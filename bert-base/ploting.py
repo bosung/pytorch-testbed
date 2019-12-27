@@ -9,13 +9,13 @@ def sampling_ploting(t_prob, ep):
     y = np.zeros(1001)
     for p in t_prob:
         y[int(p*1000)] += 1
-    # y = np.exp(y)/np.sum(np.exp(y))
+    y = y / np.sum(y)
     plt.plot(x, y)
     plt.grid(which='major', alpha=0.1)
     major_ticks = np.arange(0, 1.1, 0.1)
     plt.xticks(major_ticks)
-    plt.xlabel('p(y|x)')
-    plt.ylabel('# of examples ')
+    plt.xlabel(r'$\widehat{y}=F(x)$')
+    plt.ylabel(r'$p(\widehat{y}|x)$')
     probs = np.array(t_prob)
     plt.vlines(probs.mean(), ymin=0, ymax=y.max(), label=("μ=%.2f" % probs.mean()), colors='r')
     plt.vlines(0.5, ymin=0, ymax=y.max(), label='0.5', colors='br')

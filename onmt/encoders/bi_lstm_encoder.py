@@ -1,4 +1,5 @@
 """Define RNN-based encoders."""
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -41,6 +42,8 @@ class RNNEncoder(EncoderBase):
                         dropout=dropout,
                         bidirectional=bidirectional)
 
+        self.linear = nn.Linear(hidden_size * 4 * num_directions, 2)
+
         # Initialize the bridge layer
         self.use_bridge = use_bridge
         if self.use_bridge:
@@ -60,27 +63,34 @@ class RNNEncoder(EncoderBase):
             embeddings,
             opt.bridge)
 
-    def forward(self, src, lengths=None):
+    def forward(self, src1, src2, lengths=None):
         """See :func:`EncoderBase.forward()`"""
-        self._check_args(src, lengths)
+        # self._check_args(src, lengths)
 
-        emb = self.embeddings(src)
+        emb1 = self.embeddings(src1)
+        emb2 = self.embeddings(src2)
         # s_len, batch, emb_dim = emb.size()
 
-        packed_emb = emb
+        packed_emb = emb1
         if lengths is not None and not self.no_pack_padded_seq:
             # Lengths data is wrapped inside a Tensor.
             lengths_list = lengths.view(-1).tolist()
-            packed_emb = pack(emb, lengths_list)
+            packed_emb = pack(emb1, lengths_list)
 
         memory_bank, encoder_final = self.rnn(packed_emb)
-
+        # print(memory_bank.size()) # (batch, length, hidden)
+        v1, _ = torch.max(memory_bank, dim=1)
+        #########################################################
+        packed_emb = emb2
         if lengths is not None and not self.no_pack_padded_seq:
-            memory_bank = unpack(memory_bank)[0]
+            # Lengths data is wrapped inside a Tensor.
+            lengths_list = lengths.view(-1).tolist()
+            packed_emb = pack(emb2, lengths_list)
 
-        if self.use_bridge:
-            encoder_final = self._bridge(encoder_final)
-        return encoder_final, memory_bank, lengths
+        memory_bank, encoder_final = self.rnn(packed_emb)
+        # print(memory_bank.size()) # (batch, length, hidden)
+        v2, _ = torch.max(memory_bank, dim=1)
+        return self.linear(torch.cat([v1, v2, torch.abs(v1-v2), torch.mul(v1, v2)], dim=1))
 
     def _initialize_bridge(self, rnn_type,
                            hidden_size,

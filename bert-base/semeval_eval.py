@@ -12,27 +12,27 @@ def softmax(x):
     return np.exp(x) / np.sum(np.exp(x), axis=0)
 
 
-def semeval_eval(ep, device, eval_examples, eval_dataloader, model, logger, _type):
+def semeval_eval(ep, device, eval_examples, eval_dataloader, model, logger, BERT, _type):
     logger.info("***** [epoch %d] Running evaluation with official code *****" % ep)
     logger.info("  Num examples = %d", len(eval_examples))
     model.eval()
     eval_accuracy, nb_eval_example = 0, 0
     pred_data = []
     for i, batch in enumerate(eval_dataloader):
-        # input_ids, input_mask, segment_ids, label_ids, _, _ = batch
-        input_ids = batch[0].to(device)
-        input_mask = batch[1].to(device)
-        segment_ids = batch[2].to(device)
-        label_ids = batch[3].to(device)
-
+        batch = tuple(t.to(device) for t in batch)
         with torch.no_grad():
-            logits = model(input_ids, segment_ids, input_mask, labels=None)
+            if BERT:
+                input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                logits = model(input_ids, segment_ids, input_mask, labels=None)
+            else:
+                input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
+                logits = model(input_ids_a, input_ids_b)
 
         logits = logits.detach().cpu().numpy()
         label_ids = label_ids.to('cpu').numpy()
 
         eval_accuracy += accuracy(logits, label_ids)
-        nb_eval_example += input_ids.size(0)
+        nb_eval_example += len(label_ids)
 
         prob = softmax(logits[0])
 
