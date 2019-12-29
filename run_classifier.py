@@ -18,6 +18,8 @@
 from __future__ import absolute_import, division, print_function
 
 import argparse
+import glob
+import json
 import logging
 import os
 import random
@@ -27,8 +29,7 @@ import numpy as np
 import math
 import torch
 import torch.nn as nn
-from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
-                              TensorDataset)
+from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
@@ -55,10 +56,16 @@ from ploting import sampling_ploting, output_ploting
 from setproctitle import setproctitle
 
 from collections import Counter
-import json
 import spacy
-import torchtext.data
 
+from transformers import (
+    WEIGHTS_NAME,
+    AdamW,
+    BertConfig,
+    BertForSequenceClassification,
+    BertTokenizer,
+    get_linear_schedule_with_warmup,
+)
 
 spacy_en = spacy.load('en_core_web_sm')
 
@@ -69,8 +76,8 @@ class simple_tokenizer():
 
 
 setproctitle("(bosung) bert classifier")
-
 logger = logging.getLogger(__name__)
+
 nnSoftmax = Softmax(dim=0)
 nnLogSoftmax = LogSoftmax(dim=0)
 
@@ -814,7 +821,8 @@ def main():
                 if BERT:
                     input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
                     # define a new function to compute loss values for both output_modes
-                    logits = model(input_ids, segment_ids, input_mask, labels=None)
+                    outputs = model(input_ids, segment_ids, input_mask, labels=None)
+                    logits = outputs[0]  # if labels is None, outputs[0] is logits
                 else:
                     input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
                     logits = model(input_ids_a, input_ids_b)
@@ -919,7 +927,7 @@ def main():
                     with torch.no_grad():
                         if BERT:
                             input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
-                            logits = model(input_ids, segment_ids, input_mask, labels=None)
+                            logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
                         else:
                             input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
                             logits = model(input_ids_a, input_ids_b)
@@ -1046,7 +1054,7 @@ def main():
                 with torch.no_grad():
                     if BERT:
                         input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
-                        logits = model(input_ids, segment_ids, input_mask, labels=None)
+                        logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
                     else:
                         input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
                         logits = model(input_ids_a, input_ids_b)
@@ -1191,7 +1199,7 @@ def update_probs(train_features, model, device, args, BERT):
             if BERT:
                 input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
                 # define a new function to compute loss values for both output_modes
-                logits = model(input_ids, segment_ids, input_mask, labels=None)
+                logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
             else:
                 input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
                 logits = model(input_ids_a, input_ids_b)

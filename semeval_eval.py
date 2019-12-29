@@ -23,7 +23,7 @@ def semeval_eval(ep, device, eval_examples, eval_dataloader, model, logger, BERT
         with torch.no_grad():
             if BERT:
                 input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
-                logits = model(input_ids, segment_ids, input_mask, labels=None)
+                logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
             else:
                 input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
                 logits = model(input_ids_a, input_ids_b)
