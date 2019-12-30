@@ -44,6 +44,9 @@ class RNNEncoder(EncoderBase):
 
         self.linear = nn.Linear(hidden_size * 4 * num_directions, 2)
 
+        self.layer_norm = nn.LayerNorm(hidden_size * 4 * num_directions)
+        self.batch_norm = nn.BatchNorm1d(hidden_size * 4 * num_directions)
+
         # Initialize the bridge layer
         self.use_bridge = use_bridge
         if self.use_bridge:
@@ -63,7 +66,7 @@ class RNNEncoder(EncoderBase):
             embeddings,
             opt.bridge)
 
-    def forward(self, src1, src2, lengths=None):
+    def forward(self, src1, src2, lengths=None, LN=False):
         """See :func:`EncoderBase.forward()`"""
         # self._check_args(src, lengths)
 
@@ -90,7 +93,12 @@ class RNNEncoder(EncoderBase):
         memory_bank, encoder_final = self.rnn(packed_emb)
         # print(memory_bank.size()) # (batch, length, hidden)
         v2, _ = torch.max(memory_bank, dim=1)
-        return self.linear(torch.cat([v1, v2, torch.abs(v1-v2), torch.mul(v1, v2)], dim=1))
+
+        last_input = torch.cat([v1, v2, torch.abs(v1-v2), torch.mul(v1, v2)], dim=1)
+        if LN is True:
+            return self.linear(self.layer_norm(last_input))
+        else:
+            return self.linear(last_input)
 
     def _initialize_bridge(self, rnn_type,
                            hidden_size,

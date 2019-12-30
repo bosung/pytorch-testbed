@@ -37,16 +37,8 @@ from torch.nn import CrossEntropyLoss, MSELoss, Sigmoid, KLDivLoss, Softmax, Log
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore_support
 
-from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig
-# from modeling import BertForSequenceClassification, BertConfig, BertForSequenceClassificationCNN
-from pytorch_pretrained_bert.tokenization import BertTokenizer
-from pytorch_transformers.optimization import AdamW, WarmupLinearSchedule
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from onmt.encoders.bi_lstm_encoder import RNNEncoder
-
-# from data_processor import QnliProcessor, WikiQAProcessor, SemevalProcessor, QqpProcessor, QuacProcessor, DSTCProcessor, UbuntuProcessor, SelQAProcessor
 from data_processor import *
 from wikiqa_eval import wikiqa_eval
 from semeval_eval import semeval_eval
