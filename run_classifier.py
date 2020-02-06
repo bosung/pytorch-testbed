@@ -33,17 +33,18 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, Tens
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
-from torch.nn import CrossEntropyLoss, MSELoss, Sigmoid, KLDivLoss, Softmax, LogSoftmax, BCEWithLogitsLoss
+from torch.nn import CrossEntropyLoss, MSELoss, Sigmoid, KLDivLoss, Softmax, LogSoftmax, BCEWithLogitsLoss, TripletMarginLoss, SoftMarginLoss
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore_support
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from onmt.encoders.bi_lstm_encoder import RNNEncoder
+from models.vgg import VGG
 from data_processor import *
 from wikiqa_eval import wikiqa_eval
 from semeval_eval import semeval_eval
 from ranking_eval import ranking_eval
-from ploting import sampling_ploting, output_ploting
+from ploting.output_ploting import sampling_ploting, output_ploting
 
 from setproctitle import setproctitle
 
@@ -77,26 +78,50 @@ nnLogSoftmax = LogSoftmax(dim=0)
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, segment_ids, label_id, weight=0.01, preprob0=0.0, preprob1=0.0):
+    def __init__(self, input_ids, input_mask, segment_ids, label_id, weight=0.01, preprob=0.0):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
         self.label_id = label_id
         self.weight = weight
-        self.preprob0 = preprob0
-        self.preprob1 = preprob1
+        self.preprob = preprob
+
+
+class SimpleFeatures(object):
+    """A single set of features of data."""
+
+    def __init__(self, vector, label_id, weight=0.01, preprob=0.0):
+        self.vector = vector
+        self.label_id = label_id
+        self.weight = weight
+        self.preprob = preprob
 
 
 class InputPairFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids_a, input_ids_b, label_id, weight=0.01, preprob0=0.0, preprob1=0.0):
+    def __init__(self, input_ids_a, input_ids_b, label_id, weight=0.01, preprob=0.0):
         self.input_ids_a = input_ids_a
         self.input_ids_b = input_ids_b
         self.label_id = label_id
         self.weight = weight
-        self.preprob0 = preprob0
-        self.preprob1 = preprob1
+        self.preprob = preprob
+
+
+def divide_features_by_label(examples, labels):
+    features = []
+    features_by_label = [[], []]
+    for vector, label in zip(examples, labels):
+        features.append(SimpleFeatures(vector, label))
+        if label == 0:  # cat
+            features_by_label[0].append(SimpleFeatures(vector, 0))
+        else:
+            assert label == 1  # dog
+            features_by_label[1].append(SimpleFeatures(vector, 1))
+
+    print("[CIFAR-10] (train) label 0: %d  / label 1: %d" % (
+        len(features_by_label[0]), len(features_by_label[1])))
+    return features, features_by_label
 
 
 def convert_examples_to_features_rnn(word2idx_dict, examples, label_list, _max_seq_length,
@@ -391,6 +416,8 @@ def compute_metrics(task_name, preds, labels, probs=None, ids=None):
         return acc_precision_recall_f1(preds, labels)
     elif task_name == "ubuntu":
         return ranking_metric(preds, labels, probs, ids)
+    elif task_name == "cifar-10":
+        return acc_precision_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -429,7 +456,7 @@ def get_embedding(counter, emb_file=None, size=None, vec_size=None):
     return emb_mat, token2idx_dict
 
 
-def model_loader(args, device, num_labels, pre_trained=False, embeddings=None):
+def model_loader(args, device, num_labels, pre_trained=False, embeddings=None, bin_file=None):
     if args.model_name.split("-")[0] == 'bert':
         assert args.model_name in ["bert-base-uncased", "bert-large-uncased",
                                    "bert-base-cased", "bert-large-cased",
@@ -443,15 +470,24 @@ def model_loader(args, device, num_labels, pre_trained=False, embeddings=None):
                                                                            'distributed_{}'.format(args.local_rank))
             model = BertForSequenceClassification.from_pretrained(args.model_name, cache_dir=cache_dir,
                                                                   num_labels=num_labels)
+    elif args.model_name == 'vgg':
+        model = VGG()
+        if pre_trained is True:
+            if bin_file is None:
+                model.load_state_dict(torch.load(os.path.join(args.output_dir, 'pytorch_model.bin')))
+            else:
+                model.load_state_dict(torch.load(os.path.join(args.output_dir, bin_file)))
+
     else:
         embed_mat = torch.tensor(embeddings).to(device)
         embedding = nn.Embedding.from_pretrained(embed_mat, freeze=False)
         embedding.embedding_size = 300
-        model = RNNEncoder('LSTM', bidirectional=True, num_layers=1, hidden_size=600, embeddings=embedding)
+        rnn_hidden_size = 600
+        model = RNNEncoder('LSTM', bidirectional=True, num_layers=1, hidden_size=rnn_hidden_size, embeddings=embedding)
         if pre_trained is True:
             model.load_state_dict(torch.load(os.path.join(args.output_dir, 'pytorch_model.bin')))
         else:
-            model = RNNEncoder('LSTM', bidirectional=True, num_layers=1, hidden_size=600, embeddings=embedding)
+            model = RNNEncoder('LSTM', bidirectional=True, num_layers=1, hidden_size=rnn_hidden_size, embeddings=embedding)
 
     return model
 
@@ -472,6 +508,8 @@ def tokenizer_loader(args, device, num_labels, pre_trained=False, embeddings=Non
             # model = BertForSequenceClassification.from_pretrained(args.model_name, cache_dir=cache_dir,
             #                                                       num_labels=num_labels)
             tokenizer = BertTokenizer.from_pretrained(args.model_name, do_lower_case=args.do_lower_case)
+    elif args.task_name == 'cifar-10':
+        tokenizer = None
     else:
         tokenizer = simple_tokenizer()
 
@@ -520,6 +558,9 @@ def main():
     parser.add_argument("--do_eval",
                         action='store_true',
                         help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_train_eval",
+                        action='store_true',
+                        help="Whether to run train and eval at the same time.")
     parser.add_argument("--do_lower_case",
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
@@ -568,7 +609,7 @@ def main():
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
     parser.add_argument('--do_sampling', type=bool, default=False)
-    parser.add_argument('--sampling_method', type=str, default='random', choices=['random', 'weighted', 'top-k', 'border'])
+    parser.add_argument('--sampling_method', type=str, default='random', choices=['random', 'weighted', 'top-k', 'border', 'tardy'])
     parser.add_argument('--do_histloss', type=bool, default=False)
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--JSD_rg', type=bool, default=False)
@@ -596,6 +637,7 @@ def main():
         "dstc": DSTCProcessor,
         "ubuntu": UbuntuProcessor,
         "selqa": SelQAProcessor,
+        "cifar-10": CIFAR10Processor,
     }
 
     output_modes = {
@@ -614,6 +656,7 @@ def main():
         "dstc": "classification",
         "ubuntu": "classification",
         "selqa": "classification",
+        "cifar-10": "classification",
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -663,39 +706,21 @@ def main():
 
     label_list = processor.get_labels()
     num_labels = len(label_list)
-
+    word_emb_mat = None
     BERT = True if args.model_name.split("-")[0] == "bert" else False
 
     if args.do_train:
-        # Prepare model
+        # Prepare tokenizer
         tokenizer = tokenizer_loader(args, device, num_labels=num_labels)
-        # model, tokenizer = model_tokenizer_loader(args, device, num_labels=num_labels)
-        # model.to(device)
-        # if n_gpu > 1:
-        #     model = torch.nn.DataParallel(model)
 
         # Prepare data loader
         # train_examples = processor.get_train_examples(args.data_dir)
         dev_examples = processor.get_dev_examples(args.data_dir)
-        dev_ids = [e.guid for e in dev_examples]
 
         features_by_label = ""
-        word_emb_mat = ""
 
-        if BERT is False:
-            if os.path.exists(os.path.join(args.data_dir, 'word_emb_mat.json')):
-                with open(args.data_dir + "word_emb_mat.json") as fh:
-                    word_emb_mat = json.load(fh)
-                with open(args.data_dir+"word2idx.json") as fh:
-                    word2idx_dict = json.load(fh)
-            else:
-                counter = Counter()
-                word_counting(args, counter, processor, tokenizer)
-
-                word_emb_mat, word2idx_dict = get_embedding(
-                    counter, '/home/nlpgpu5/data/embeddings/glove.840B.300d.txt', int(2.2e6), 300)
-                save(args.data_dir+"word_emb_mat.json", word_emb_mat, message="word embedding")
-                save(args.data_dir+"word2idx.json", word2idx_dict, message="word2idx")
+        if args.model_name in ["rnn"]:
+            word2idx_dict, word_emb_mat = word_embeddings(args, processor, tokenizer, word_emb_mat)
 
         if args.do_sampling is True:  # for num_train_optimization step
             train_steps_per_ep = math.ceil(
@@ -704,28 +729,37 @@ def main():
             if args.model_name.split("-")[0] == "bert":
                 train_features, features_by_label = convert_examples_to_features(
                     train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
+            elif args.task_name == "cifar-10":
+                train_vectors, train_labels = train_examples  # (vector, label)
+                train_features, features_by_label = divide_features_by_label(train_vectors, train_labels)
             else:
                 train_features, features_by_label = convert_examples_to_features_rnn(word2idx_dict,
                     train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
 
             num_train_examples = args.negative_size + args.positive_size
         else:
-            # FIXME
             if os.path.exists(os.path.join(args.data_dir, 'train-%s.pt' % args.model_name)):
                 train_data = torch.load(os.path.join(args.data_dir, 'train-%s.pt' % args.model_name))
-                # all_label_ids = torch.load(os.path.join(args.data_dir, 'train_labels.pt'))
             else:
-                train_examples = processor.get_train_examples(args.data_dir)
                 if BERT:
+                    train_examples = processor.get_train_examples(args.data_dir)
                     train_features, features_by_label = convert_examples_to_features(
                         train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
+                    train_data, _ = get_tensor_dataset(train_features, output_mode, BERT)
+                    torch.save(train_data, os.path.join(args.data_dir, 'train-%s.pt' % args.model_name))
+                    # torch.save(all_label_ids, os.path.join(args.data_dir, 'train_labels.pt'))
+                elif args.task_name == "cifar-10":
+                    train_features, labels = processor.get_train_examples(args.data_dir)  # (vector, label)
+                    # features_by_label = processor.get_features(train_examples)
+                    train_data = TensorDataset(
+                        torch.tensor(train_features, dtype=torch.float), torch.tensor(labels, dtype=torch.long))
                 else:
-                    train_features, features_by_label = convert_examples_to_features_rnn(word2idx_dict,
-                        train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
-
-                train_data, _ = get_tensor_dataset(train_features, output_mode, BERT)
-                torch.save(train_data, os.path.join(args.data_dir, 'train-%s.pt' % args.model_name))
-                # torch.save(all_label_ids, os.path.join(args.data_dir, 'train_labels.pt'))
+                    train_examples = processor.get_train_examples(args.data_dir)
+                    train_features, features_by_label = convert_examples_to_features_rnn(
+                        word2idx_dict, train_examples, label_list, args.max_seq_length, tokenizer, output_mode, sep=True)
+                    train_data, _ = get_tensor_dataset(train_features, output_mode, BERT)
+                    torch.save(train_data, os.path.join(args.data_dir, 'train-%s.pt' % args.model_name))
+                    # torch.save(all_label_ids, os.path.join(args.data_dir, 'train_labels.pt'))
                 logger.info("train data tensors saved !")
 
             num_train_examples = len(train_data)
@@ -745,10 +779,15 @@ def main():
             if BERT:
                 dev_features = convert_examples_to_features(
                     dev_examples, label_list, args.max_seq_length, tokenizer, output_mode)
+                dev_data, all_dev_label_ids = get_tensor_dataset(dev_features, output_mode, BERT)
+            elif args.task_name == "cifar-10":
+                dev_data, dev_labels = processor.get_dev_examples(args.data_dir)
+                all_dev_label_ids = torch.tensor(dev_labels, dtype=torch.long)
+                dev_data = TensorDataset(torch.tensor(dev_data, dtype=torch.float), all_dev_label_ids)
             else:
                 dev_features = convert_examples_to_features_rnn(
                     word2idx_dict, dev_examples, label_list, args.max_seq_length, tokenizer, output_mode)
-            dev_data, all_dev_label_ids = get_tensor_dataset(dev_features, output_mode, BERT)
+                dev_data, all_dev_label_ids = get_tensor_dataset(dev_features, output_mode, BERT)
             torch.save(dev_data, os.path.join(args.data_dir, 'dev-%s.pt' % args.model_name))
             torch.save(all_dev_label_ids, os.path.join(args.data_dir, 'dev_labels.pt'))
             logger.info("dev data tensors saved !")
@@ -771,10 +810,10 @@ def main():
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
 
-        # loss weight for historical objective function
-        # loss_weight = torch.nn.Parameter(torch.tensor([0.5], dtype=torch.float).to(device))
+        # loss weight
+        _lambda = torch.nn.Parameter(torch.tensor([0.0001], dtype=torch.float).to(device))
 
-        # optimizer_grouped_parameters[0]['params'].append(loss_weight)
+        optimizer_grouped_parameters[1]['params'].append(_lambda)
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
         # optimizer_grouped_parameters2 = [
         #     {'params': [p for n, p in param_optimizer if n in ["classifier.weight", "classifier.bias"]],
@@ -790,7 +829,6 @@ def main():
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
 
-
         dev_results = []
         var_results = []
         mean_results = []
@@ -800,10 +838,9 @@ def main():
 
             if args.do_sampling is True:
                 logger.info(" [epoch %d] (sampling) get new dataloader ... " % ep)
-                train_dataloader = get_sampling_dataloader(args, features_by_label, BERT)
+                train_dataloader = get_sampling_dataloader(ep, args, features_by_label, BERT)
 
             logger.info(" [epoch %d] trainig iteration starts ... *****" % ep)
-            n_pos, n_neg = 0, 0
             label0_t_prob = []
             label1_t_prob = []
             t_prob = []
@@ -811,29 +848,52 @@ def main():
                 batch = tuple(t.to(device) for t in batch)
 
                 if BERT:
-                    input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                    input_ids, input_mask, segment_ids, label_ids, preprob = batch
                     # define a new function to compute loss values for both output_modes
                     outputs = model(input_ids, segment_ids, input_mask, labels=None)
                     logits = outputs[0]  # if labels is None, outputs[0] is logits
+                elif args.task_name == 'cifar-10':
+                    inputs, label_ids = batch
+                    logits = model(inputs)
                 else:
-                    input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
+                    input_ids_a, input_ids_b, label_ids, preprob = batch
                     logits = model(input_ids_a, input_ids_b)
                 loss_fct = CrossEntropyLoss(reduction='none')
                 _loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
-                loss = _loss.mean()  # default = 'mean'
-                # loss_no_red = CrossEntropyLoss(reduction='none')(logits.view(-1, num_labels), label_ids.view(-1))
-                # pre_loss_sum += loss_no_red.sum().item()
+                loss1 = _loss.mean()  # default = 'mean'
+
+                # triplet_loss = TripletMarginLoss(margin=0.01)
+                label_mask = (label_ids == 0)
+                label0_probs = Softmax(dim=1)(logits[label_mask])[:, 1]
+                label1_probs = Softmax(dim=1)(logits[~label_mask])[:, 1]
+
+                n_pos = label1_probs.size(0)
+                # anchor = label1_probs.new_ones(1, n_pos)
+                # loss2 = triplet_loss(anchor, label1_probs, label0_probs[:n_pos])
+                # n_labels = label_ids.clone()
+                # n_labels[n_labels == 0] = -1
+                # sml = SoftMarginLoss()
+                # loss2 = sml(logits[:, 1], n_labels.float())
+                #
+                # if n_pos > 0:
+                #     label0_loss = _loss[label_mask].mean()
+                #     label1_loss = _loss[~label_mask].mean()
+                #     # loss = (0.95*loss1 + 0.05*loss2)
+                #     loss = loss1 + 0.0001 * label1_loss
+                # else:
+                #     loss = loss1
+                loss = loss1
 
                 if args.debug is True or args.JSD_rg is True or args.mu_rg is True:
-                    label_mask = (label_ids == 0)
-                    label0_loss = _loss[label_mask]
-                    label1_loss = _loss[~label_mask]
-                    n_neg += label0_loss.size(0)
-                    n_pos += label1_loss.size(0)
+                    # label_mask = (label_ids == 0)
+                    # label0_loss = _loss[label_mask]
+                    # label1_loss = _loss[~label_mask]
+                    # n_neg += label0_loss.size(0)
+                    # n_pos += label1_loss.size(0)
                     label0_logits = Softmax(dim=1)(logits[label_mask])[:, 1]
                     label1_logits = Softmax(dim=1)(logits[~label_mask])[:, 1]
-                    label0_t_prob.extend(label0_logits.tolist())
-                    label1_t_prob.extend(label1_logits.tolist())
+                    label0_t_prob.extend(label0_probs.tolist())
+                    label1_t_prob.extend(label1_probs.tolist())
                     probs = Softmax(dim=1)(logits)[:, 1]
                     t_prob.extend(probs.tolist())
 
@@ -849,28 +909,29 @@ def main():
                 #     logger.info("   loss = %.8f" % loss)
 
                 # experiment: minimize the difference between two classes
-                if args.JSD_rg is True and label1_loss.size(0) > 1:  # exclude the case only negatives in mini-batch.
+                if args.JSD_rg is True and n_pos > 1:  # exclude the case only negatives in mini-batch.
                     KLD1 = KL_loss(label1_logits, label0_logits)
                     KLD2 = KL_loss(label0_logits, label1_logits)
                     # logger.info("KLD1: %.6f, KLD2: %.6f, (KLD1+KLD2)/2: %.6f" % (KLD1, KLD2, (KLD1+KLD2)*0.5))
                     if KLD1 < 10 and KLD2 < 10:
-                        loss = loss + 0.0001 * 0.5 * (KLD1 + KLD2)
+                        loss = loss + 0.00001 * 0.5 * (KLD1 + KLD2)
+                        # loss = loss + _lambda * 0.5 * (KLD1 + KLD2)
                 if args.mu_rg is True:
                     mu = probs.mean()
-                    loss = loss + 0.0001 * 0.5 * (mu - 0.5) * (mu - 0.5)
+                    loss = loss + 0.00001 * 0.5 * (mu - 0.5) * (mu - 0.5)
 
-                loss.backward()
+                loss.backward(retain_graph=True)
                 optimizer.step()
                 optimizer.zero_grad()
+                _lambda = torch.clamp(_lambda, min=0.00001, max=0.001)
 
             # end of epoch
+            logger.info("    _lambda: %.6f" % (_lambda.item()))
             if args.JSD_rg is True:
                 logger.info("Jensen-Shannon Divergence Regularization applied")
             if args.mu_rg is True:
                 logger.info("Mean Divergence Regularization applied")
             if args.debug is True:
-                assert len(label0_t_prob) == n_neg
-                assert len(label1_t_prob) == n_pos
                 logger.info("prob mean: %.6f, var: %.6f" %
                             (torch.tensor(t_prob).mean().item(),
                              torch.tensor(t_prob).var().item()))
@@ -881,6 +942,11 @@ def main():
                 logger.info("     var: %.6f  |  %.6f" %
                             (torch.tensor(label0_t_prob).var().item(),
                              torch.tensor(label1_t_prob).var().item()))
+                logger.info("     weight: %0.6f" % model.layer_norm.weight[0])
+                logger.info("       bias: %0.6f" % model.layer_norm.bias[0])
+                # for t in model.named_parameters():
+                #     name, param = t
+                #     logger.info("%20s, mean: %0.6f, var: %0.6f" % (name, param.mean(), param.var()))
                 sampling_ploting(t_prob, ep)
                 # output_ploting(label0_t_prob, label1_t_prob, ep)
                 mean_results.append(torch.tensor(t_prob).mean().item())
@@ -891,7 +957,7 @@ def main():
             # update weight in sampling experiments
             if args.do_sampling is True and args.sampling_method not in ['random']:
                 logger.info(" [epoch %d] update pre probs ... " % ep)
-                train_features, features_by_label = update_probs(train_features, model, device, args, BERT)
+                train_features, features_by_label = update_probs(ep, train_features, model, device, args, BERT)
             ##########################################################################
             # eval with dev set.
             dev_sampler = SequentialSampler(dev_data)
@@ -918,10 +984,13 @@ def main():
                     batch = tuple(t.to(device) for t in batch)
                     with torch.no_grad():
                         if BERT:
-                            input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                            input_ids, input_mask, segment_ids, label_ids, preprob = batch
                             logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
+                        elif args.task_name == "cifar-10":
+                            inputs, label_ids = batch
+                            logits = model(inputs)
                         else:
-                            input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
+                            input_ids_a, input_ids_b, label_ids, preprob = batch
                             logits = model(input_ids_a, input_ids_b)
 
                     # create eval loss and other metric required by the task
@@ -947,8 +1016,7 @@ def main():
                     preds = np.argmax(preds, axis=1)
                 elif output_mode == "regression":
                     preds = np.squeeze(preds)
-                result = compute_metrics(task_name, preds, all_dev_label_ids.numpy(),
-                                         probs=probs, ids=dev_ids)
+                result = compute_metrics(task_name, preds, all_dev_label_ids.numpy(), probs=probs)
                 loss = tr_loss / global_step if args.do_train else None
 
                 result['dev_loss'] = dev_loss
@@ -958,20 +1026,28 @@ def main():
                     logger.info("  %s = %s", key, str(result[key]))
 
                 if task_name == "squad":
-                    score = str(round(result['f1'], 4))
+                    score = round(result['f1'], 4)
                     dev_results.append(score)
-                elif task_name in ["quac", "dstc", 'ubuntu', 'selqa']:
-                    score = str(round(result['f1'][1], 4))
+                elif task_name in ["quac", "dstc", 'ubuntu', 'selqa', 'cifar-10']:
+                    score = round(result['f1'][1], 4)
                     dev_results.append(score)
                 else:
-                    score = str(round(result['acc'], 4))
+                    score = round(result['acc'], 4)
+                    dev_results.append(score)
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-            output_model_file = os.path.join(args.output_dir, 'pytorch_model_%d_%s.bin' % (ep, score))
+            output_model_file = os.path.join(args.output_dir, 'pytorch_model_%d_%.4f.bin' % (ep, score))
             torch.save(model_to_save.state_dict(), output_model_file)
 
         # end of whole training
-        for result in dev_results:
+        idx, _max = 0, 0
+        for i, result in enumerate(dev_results):
+            if result > _max:
+                _max = result
+                _idx = i+1
             print(result)
+        print("max: ep %d, %.4f" % (_idx, _max))
+        max_model_file = ("pytorch_model_%d_%.4f.bin" % (_idx, _max))
+        print("max weight: %s" % max_model_file)
         for result in mean_results:
             print(result)
         for result in var_results:
@@ -979,32 +1055,34 @@ def main():
 
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+        # output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
 
         if BERT:
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             torch.save(model_to_save.state_dict(), output_model_file)
-            model_to_save.config.to_json_file(output_config_file)
+            # model_to_save.config.to_json_file(output_config_file)
             tokenizer.save_vocabulary(args.output_dir)
         else:
             torch.save(model.state_dict(), output_model_file)
 
-    if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        if BERT is False:
+    if args.do_eval or args.do_train_eval:
+        if args.model_name == 'rnn':
             if os.path.exists(os.path.join(args.data_dir, 'word_emb_mat.json')):
                 with open(args.data_dir + "word_emb_mat.json") as fh:
                     word_emb_mat = json.load(fh)
                 with open(args.data_dir+"word2idx.json") as fh:
                     word2idx_dict = json.load(fh)
-        # Load a trained model and vocabulary that you have fine-tuned
-        # model = BertForSequenceClassification.from_pretrained(args.output_dir, num_labels=num_labels)
         tokenizer = tokenizer_loader(args, device, num_labels=num_labels, pre_trained=True)
-        model = model_loader(args, device, num_labels=num_labels, pre_trained=True, embeddings=word_emb_mat)
-        # tokenizer = BertTokenizer.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
+        if args.do_train_eval:
+            logger.info("  Test with %s file" % max_model_file)
+            model = model_loader(
+                args, device, num_labels=num_labels, pre_trained=True, embeddings=word_emb_mat, bin_file=max_model_file)
+        else:
+            model = model_loader(args, device, num_labels=num_labels, pre_trained=True, embeddings=word_emb_mat)
         model.to(device)
 
         test_examples = processor.get_test_examples(args.data_dir)
-        test_ids = [e.guid for e in test_examples]
+        # test_ids = [e.guid for e in test_examples]
         if os.path.exists(os.path.join(args.data_dir, 'test-%s.pt' % args.model_name)):
             test_data = torch.load(os.path.join(args.data_dir, 'test-%s.pt' % args.model_name))
             all_label_ids = torch.load(os.path.join(args.data_dir, 'test_labels.pt'))
@@ -1012,10 +1090,16 @@ def main():
             if BERT:
                 test_features = convert_examples_to_features(
                     test_examples, label_list, args.max_seq_length, tokenizer, output_mode)
+                test_data, all_label_ids = get_tensor_dataset(test_features, output_mode, BERT)
+            elif args.task_name == 'cifar-10':
+                test_features, test_labels = test_examples
+                all_label_ids = torch.tensor(test_labels, dtype=torch.long)
+                test_data = TensorDataset(
+                    torch.tensor(test_features, dtype=torch.float), all_label_ids)
             else:
                 test_features = convert_examples_to_features_rnn(
                     word2idx_dict, test_examples, label_list, args.max_seq_length, tokenizer, output_mode)
-            test_data, all_label_ids = get_tensor_dataset(test_features, output_mode, BERT)
+                test_data, all_label_ids = get_tensor_dataset(test_features, output_mode, BERT)
             torch.save(test_data, os.path.join(args.data_dir, 'test-%s.pt' % args.model_name))
             torch.save(all_label_ids, os.path.join(args.data_dir, 'test_labels.pt'))
             logger.info("Test data tensors saved !")
@@ -1045,10 +1129,13 @@ def main():
                 batch = tuple(t.to(device) for t in batch)
                 with torch.no_grad():
                     if BERT:
-                        input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                        input_ids, input_mask, segment_ids, label_ids, preprob = batch
                         logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
+                    elif args.task_name == "cifar-10":
+                        inputs, label_ids = batch
+                        logits = model(inputs)
                     else:
-                        input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
+                        input_ids_a, input_ids_b, label_ids, preprob = batch
                         logits = model(input_ids_a, input_ids_b)
 
                 # create eval loss and other metric required by the task
@@ -1075,7 +1162,7 @@ def main():
             elif output_mode == "regression":
                 preds = np.squeeze(preds)
             result = compute_metrics(task_name, preds, all_label_ids.numpy(),
-                                     probs=probs, ids=test_ids)
+                                     probs=probs)
             loss = tr_loss / global_step if args.do_train else None
 
             result['eval_loss'] = eval_loss
@@ -1089,73 +1176,22 @@ def main():
                     logger.info("  %s = %s", key, str(result[key]))
                     writer.write("%s = %s\n" % (key, str(result[key])))
 
-        # hack for MNLI-MM
-        if task_name == "mnli":
-            task_name = "mnli-mm"
-            processor = processors[task_name]()
 
-            if os.path.exists(args.output_dir + '-MM') and os.listdir(args.output_dir + '-MM') and args.do_train:
-                raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
-            if not os.path.exists(args.output_dir + '-MM'):
-                os.makedirs(args.output_dir + '-MM')
+def word_embeddings(args, processor, tokenizer, word_emb_mat):
+    if os.path.exists(os.path.join(args.data_dir, 'word_emb_mat.json')):
+        with open(args.data_dir + "word_emb_mat.json") as fh:
+            word_emb_mat = json.load(fh)
+        with open(args.data_dir + "word2idx.json") as fh:
+            word2idx_dict = json.load(fh)
+    else:
+        counter = Counter()
+        word_counting(args, counter, processor, tokenizer)
 
-            eval_examples = processor.get_dev_examples(args.data_dir)
-            eval_features = convert_examples_to_features(
-                eval_examples, label_list, args.max_seq_length, tokenizer, output_mode)
-            logger.info("***** Running evaluation *****")
-            logger.info("  Num examples = %d", len(eval_examples))
-            logger.info("  Batch size = %d", args.eval_batch_size)
-            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-            all_label_ids = torch.tensor([f.label_id for f in eval_features], dtype=torch.long)
-
-            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
-            # Run prediction for full data
-            eval_sampler = SequentialSampler(eval_data)
-            eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
-
-            model.eval()
-            eval_loss = 0
-            nb_eval_steps = 0
-            preds = []
-
-            for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
-                input_ids = input_ids.to(device)
-                input_mask = input_mask.to(device)
-                segment_ids = segment_ids.to(device)
-                label_ids = label_ids.to(device)
-
-                with torch.no_grad():
-                    logits = model(input_ids, segment_ids, input_mask, labels=None)
-
-                loss_fct = CrossEntropyLoss()
-                tmp_eval_loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
-
-                eval_loss += tmp_eval_loss.mean().item()
-                nb_eval_steps += 1
-                if len(preds) == 0:
-                    preds.append(logits.detach().cpu().numpy())
-                else:
-                    preds[0] = np.append(
-                        preds[0], logits.detach().cpu().numpy(), axis=0)
-
-            eval_loss = eval_loss / nb_eval_steps
-            preds = preds[0]
-            preds = np.argmax(preds, axis=1)
-            result = compute_metrics(task_name, preds, all_label_ids.numpy())
-            loss = tr_loss / global_step if args.do_train else None
-
-            result['eval_loss'] = eval_loss
-            result['global_step'] = global_step
-            result['loss'] = loss
-
-            output_eval_file = os.path.join(args.output_dir + '-MM', "eval_results.txt")
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key in sorted(result.keys()):
-                    logger.info("  %s = %s", key, str(result[key]))
-                    writer.write("%s = %s\n" % (key, str(result[key])))
+        word_emb_mat, word2idx_dict = get_embedding(
+            counter, '/home/nlpgpu5/data/embeddings/glove.840B.300d.txt', int(2.2e6), 300)
+        save(args.data_dir + "word_emb_mat.json", word_emb_mat, message="word embedding")
+        save(args.data_dir + "word2idx.json", word2idx_dict, message="word2idx")
+    return word2idx_dict, word_emb_mat
 
 
 def save(filename, obj, message=None):
@@ -1177,11 +1213,11 @@ def word_counting(args, counter, processor, tokenizer):
             counter[t] += 1
 
 
-def update_probs(train_features, model, device, args, BERT):
+def update_probs(ep, train_features, model, device, args, BERT):
     def func(x):
         return 4 * (-(x * x) + x)
 
-    train_data, _ = get_tensor_dataset(train_features, "classification", BERT)
+    train_data, _ = get_tensor_dataset(args, train_features, "classification", BERT)
     loader = DataLoader(train_data, sampler=SequentialSampler(train_data), batch_size=1024)
     global_logit_idx = 0
     for batch in loader:
@@ -1189,18 +1225,19 @@ def update_probs(train_features, model, device, args, BERT):
 
         with torch.no_grad():
             if BERT:
-                input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
+                input_ids, input_mask, segment_ids, label_ids, preprob = batch
                 # define a new function to compute loss values for both output_modes
                 logits, _, _ = model(input_ids, segment_ids, input_mask, labels=None)
+            elif args.task_name == 'cifar-10':
+                inputs, label_ids = batch
+                logits = model(inputs)
             else:
-                input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
+                input_ids_a, input_ids_b, label_ids, preprob = batch
                 logits = model(input_ids_a, input_ids_b)
 
         probs = Softmax(dim=-1)(logits)
         batch_size = logits.size(0)
         for i in range(batch_size):
-            train_features[global_logit_idx + i].preprob0 = probs[i][0].item()
-            train_features[global_logit_idx + i].preprob1 = probs[i][1].item()
             if args.sampling_method == 'weighted':
                 if label_ids[i] == 0:
                     train_features[global_logit_idx + i].weight = probs[i][1].item()
@@ -1208,6 +1245,13 @@ def update_probs(train_features, model, device, args, BERT):
                     train_features[global_logit_idx + i].weight = probs[i][0].item()
             elif args.sampling_method == 'border':
                 train_features[global_logit_idx+i].weight = func(probs[i][1].item())
+            elif args.sampling_method == 'tardy' and ep > 1:
+                # TODO tardy sampling
+                cur_prob = probs[i][1].item()
+                pre_prob = train_features[global_logit_idx+i].preprob
+                train_features[global_logit_idx+i].weight = (1 - ((pre_prob-cur_prob)/pre_prob))*cur_prob
+            # update pre-prob
+            train_features[global_logit_idx + i].preprob = probs[i][1].item()
         global_logit_idx += batch_size
 
     assert global_logit_idx == len(train_data)
@@ -1225,21 +1269,23 @@ def softmax(x):
     return np.exp(x) / sum(np.exp(x))
 
 
-def get_sampling_dataloader(args, features_by_label, BERT):
+def get_sampling_dataloader(ep, args, features_by_label, BERT):
     if args.sampling_method not in ['random']:
+        # temp = np.array([i.weight for i in features_by_label[0]])
+        # weight0 = temp / np.sum(temp)
         weight0 = softmax([i.weight for i in features_by_label[0]])
         weight1 = softmax([i.weight for i in features_by_label[1]])
     # if len(features_by_label[0]) > len(features_by_label[1]):
-    if args.sampling_method in ['weighted', 'border']:  # weighted sampling
+    if args.sampling_method in ['weighted', 'border'] or (args.sampling_method == 'tardy' and ep > 2):  # weighted sampling
         logger.info(" => %s sampling ..." % args.sampling_method)
         label_0 = np.random.choice(features_by_label[0], args.negative_size, replace=False, p=weight0)
         label_1 = np.random.choice(features_by_label[1], args.positive_size, replace=False, p=weight1)
-    elif args.sampling_method == 'random':  # random sampling
+    elif args.sampling_method == 'random' or (args.sampling_method == 'tardy' and ep <= 2):  # random sampling
         logger.info(" => Random sampling ...")
         label_0 = np.random.choice(features_by_label[0], args.negative_size, replace=False)
         label_1 = np.random.choice(features_by_label[1], args.positive_size, replace=False)
     total = np.concatenate((label_0, label_1))
-    train_data, _ = get_tensor_dataset(total, "classification", BERT)
+    train_data, _ = get_tensor_dataset(args, total, "classification", BERT)
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
     return train_dataloader
@@ -1293,7 +1339,7 @@ def get_gated_sampling_dataloader(device, ep, args, features_by_label, pre_loss=
     return train_dataloader
 
 
-def get_tensor_dataset(features, output_mode, BERT):
+def get_tensor_dataset(args, features, output_mode, BERT):
     if BERT:
         all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
         all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
@@ -1302,20 +1348,19 @@ def get_tensor_dataset(features, output_mode, BERT):
             all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
         elif output_mode == "regression":
             all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
-        all_preprob0 = torch.tensor([f.preprob0 for f in features], dtype=torch.float)
-        all_preprob1 = torch.tensor([f.preprob1 for f in features], dtype=torch.float)
-        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_preprob0,
-                                   all_preprob1)
-        return train_data, all_label_ids
+        all_preprob = torch.tensor([f.preprob for f in features], dtype=torch.float)
+        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_preprob)
+    elif args.task_name == 'cifar-10':
+        all_inputs = torch.tensor([f.vector for f in features], dtype=torch.float)
+        all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
+        train_data = TensorDataset(all_inputs, all_label_ids)
     else:
         all_input_ids_a = torch.tensor([f.input_ids_a for f in features], dtype=torch.long)
         all_input_ids_b = torch.tensor([f.input_ids_b for f in features], dtype=torch.long)
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
-        all_preprob0 = torch.tensor([f.preprob0 for f in features], dtype=torch.float)
-        all_preprob1 = torch.tensor([f.preprob1 for f in features], dtype=torch.float)
-        train_data = TensorDataset(all_input_ids_a, all_input_ids_b, all_label_ids, all_preprob0,
-                                   all_preprob1)
-        return train_data, all_label_ids
+        all_preprob = torch.tensor([f.preprob for f in features], dtype=torch.float)
+        train_data = TensorDataset(all_input_ids_a, all_input_ids_b, all_label_ids, all_preprob)
+    return train_data, all_label_ids
 
 
 def KL_loss(p, q):

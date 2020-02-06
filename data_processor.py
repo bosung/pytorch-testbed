@@ -1,6 +1,9 @@
 import csv
 import os
 import sys
+import torch
+import torchvision
+import torchvision.transforms as transforms
 
 
 class InputExample(object):
@@ -587,3 +590,75 @@ class SelQAProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+
+class CIFAR10Processor(DataProcessor):
+
+    def __init__(self):
+        self.transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        self.trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                                     download=True, transform=self.transform)
+        self.testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                                   download=True, transform=self.transform)
+        self.train_features = None
+        self.train_labels = None
+        self.dev_features = None
+        self.dev_labels = None
+        self.divide_dataset()
+
+    def divide_dataset(self):
+        negatives = []
+        n_labels = []
+        positives = []
+        p_labels = []
+        for e in self.trainset:
+            vector, label = e
+            if label == 3:
+                negatives.append(vector.tolist())
+                n_labels.append(0)
+            elif label == 5:
+                positives.append(vector.tolist())
+                p_labels.append(1)
+        dev_size = 500
+        # TODO change size
+        self.train_features = negatives[dev_size:] + positives[dev_size:dev_size+450]
+        self.train_labels = n_labels[dev_size:] + p_labels[dev_size:dev_size+450]
+        self.dev_features = negatives[:dev_size] + positives[:dev_size]
+        self.dev_labels = n_labels[:dev_size] + p_labels[:dev_size]
+
+    def get_train_examples(self, data_dir):
+        print("[CIFAR-10] (train) filtered data: %d" % len(self.train_features))
+        return self.train_features, self.train_labels
+
+    def get_dev_examples(self, data_dir):
+        print("[CIFAR-10] (dev) filtered data: %d" % len(self.dev_features))
+        return self.dev_features, self.dev_labels
+
+    def get_test_examples(self, data_dir):
+        # test data
+        features, labels = [], []
+        for e in self.testset:
+            vector, label = e
+            if label == 3:
+                features.append(vector.tolist())
+                labels.append(0)
+            elif label == 5:
+                features.append(vector.tolist())
+                labels.append(1)
+        print("[CIFAR-10] (test) filtered data: %d" % len(features))
+        return features, labels
+
+    def get_labels(self):
+        return ["0", "1"]  # cat=3, dog=5
+
+    def get_features(self, examples):
+        result = [[], []]
+        for e in examples:
+            vector, label = e
+            if label == 3:  # cat=3
+                result[0].append((vector, 0))
+            else:
+                result[1].append((vector, 1))
+        print("[CIFAR-10] (train) label 0: %d  / label 1: %d" % (len(result[0]), len(result[1])))
+        return result
