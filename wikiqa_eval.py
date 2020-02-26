@@ -21,11 +21,12 @@ def wikiqa_eval(ep, device, eval_examples, eval_dataloader, model, logger, BERT)
         batch = tuple(t.to(device) for t in batch)
         with torch.no_grad():
             if BERT:
-                input_ids, input_mask, segment_ids, label_ids, preprob0, preprob1 = batch
-                logits = model(input_ids, segment_ids, input_mask, labels=None)
+                input_ids, input_mask, segment_ids, label_ids, preprob = batch
+                output = model(input_ids, segment_ids, input_mask, labels=None)
             else:
-                input_ids_a, input_ids_b, label_ids, preprob0, preprob1 = batch
-                logits = model(input_ids_a, input_ids_b)
+                input_ids_a, input_ids_b, label_ids, preprob = batch
+                output = model(input_ids_a, input_ids_b)
+            logits = output[0]
 
         logits = logits.detach().cpu().numpy()
         label_ids = label_ids.to('cpu').numpy()
