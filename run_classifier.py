@@ -47,6 +47,8 @@ from ranking_eval import ranking_eval
 from ploting.output_ploting import sampling_ploting, output_ploting
 
 from setproctitle import setproctitle
+# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from collections import Counter
 import spacy
@@ -345,9 +347,9 @@ def acc_precision_recall_f1(preds, labels):
     precision, recall, f1, _ = precision_recall_fscore_support(y_true=labels, y_pred=preds)
     results = {
         "acc": acc,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
+        "precision": [round(x, 4) for x in precision],
+        "recall": [round(x, 4) for x in recall],
+        "f1": [round(x, 4) for x in f1],
         "acc_and_f1": (acc + f1) / 2,
     }
     return results
@@ -715,6 +717,8 @@ def main():
     args.BERT = True if args.model_name.split("-")[0] == "bert" else False
     args.CIFAR = True if args.task_name.split("-")[0] == "cifar" else False
 
+    summary = SummaryWriter()  # default 'log_dir' is "runs"
+
     if args.do_train:
         # Prepare tokenizer
         tokenizer = tokenizer_loader(args, device, num_labels=num_labels)
@@ -849,6 +853,8 @@ def main():
             major_t_prob = []
             minor_t_prob = []
             t_prob = []
+            c_prob = [[] for _ in range(num_labels)]
+            d_prob = [[] for _ in range(num_labels)]
             for step, batch in enumerate(train_dataloader):
                 batch = tuple(t.to(device) for t in batch)
 
@@ -866,10 +872,9 @@ def main():
                 loss_fct = CrossEntropyLoss(reduction='none')
                 _loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
                 loss1 = _loss.mean()  # default = 'mean'
+                summary.add_scalar('training_loss', loss1.item(), global_step)
 
-                # triplet_loss = TripletMarginLoss(margin=0.01)
-                # TODO
-                label_mask = (label_ids == 4)  # major class == 0
+                label_mask = (label_ids == 1)  # major class == 0
                 major_probs = Softmax(dim=1)(logits[label_mask])[:, 1]
                 minor_probs = Softmax(dim=1)(logits[~label_mask])[:, 1]
 
@@ -877,12 +882,17 @@ def main():
                 loss = loss1
 
                 if args.debug is True or args.JSD_rg is True or args.mu_rg is True:
-                    major_probs = Softmax(dim=1)(logits[label_mask])[:, 1]
-                    minor_probs = Softmax(dim=1)(logits[~label_mask])[:, 1]
                     major_t_prob.extend(major_probs.tolist())
                     minor_t_prob.extend(minor_probs.tolist())
-                    probs = Softmax(dim=1)(logits)[:, 1]
-                    t_prob.extend(probs.tolist())
+                    # probs = Softmax(dim=1)(logits)[:, 1]
+                    probs = Softmax(dim=1)(logits)
+                    t_prob.extend(probs.view(-1).tolist())
+                    for k in range(num_labels):
+                        d_prob[k].extend(probs[:, k].tolist())
+                        _mask = (label_ids == k)
+                        if _mask.size(0) > 0:
+                            _probs = Softmax(dim=1)(logits[_mask])[:, k]
+                            c_prob[k].extend(_probs.tolist())
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
@@ -905,7 +915,7 @@ def main():
                         # loss = loss + _lambda * 0.5 * (KLD1 + KLD2)
                 if args.mu_rg is True:
                     mu = probs.mean()
-                    loss = loss + 0.00001 * 0.5 * (mu - 0.5) * (mu - 0.5)
+                    loss = loss + 0.0001 * 0.5 * (mu - 0.5) * (mu - 0.5)
 
                 loss.backward(retain_graph=True)
                 optimizer.step()
@@ -933,11 +943,18 @@ def main():
                 # for t in model.named_parameters():
                 #     name, param = t
                 #     logger.info("%20s, mean: %0.6f, var: %0.6f" % (name, param.mean(), param.var()))
-                sampling_ploting(t_prob, ep)
+                # sampling_ploting(t_prob, ep)
                 # output_ploting(label0_t_prob, label1_t_prob, ep)
                 mean_results.append(torch.tensor(t_prob).mean().item())
-                var_results.append(
-                    abs((torch.tensor(minor_t_prob).var() - torch.tensor(major_t_prob).var()).item()))
+                # var_results.append(
+                #     abs((torch.tensor(minor_t_prob).var() - torch.tensor(major_t_prob).var()).item()))
+                var_results.append(torch.tensor(t_prob).var().item())
+                for k in range(num_labels):
+                    logger.info("[class %d (y=true)] %d mean: %.4f, var: %.4f" % (
+                        k, len(c_prob[k]), torch.tensor(c_prob[k]).mean().item(), torch.tensor(c_prob[k]).var().item()))
+                for k in range(num_labels):
+                    logger.info("[class %d (total )] %d mean: %.4f, var: %.4f" % (
+                        k, len(d_prob[k]), torch.tensor(d_prob[k]).mean().item(), torch.tensor(d_prob[k]).var().item()))
 
             ##########################################################################
             # update weight in sampling experiments
@@ -986,7 +1003,6 @@ def main():
                     elif output_mode == "regression":
                         loss_fct = MSELoss()
                         tmp_eval_loss = loss_fct(logits.view(-1), label_ids.view(-1))
-
                     dev_loss += tmp_eval_loss.mean().item()
                     nb_dev_steps += 1
                     if len(preds) == 0:
@@ -1020,6 +1036,7 @@ def main():
                 else:
                     score = round(result['acc'], 4)
                     dev_results.append(score)
+            summary.add_scalar('dev_score', score, ep)
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_model_file = os.path.join(args.output_dir, 'pytorch_model_%d_%.4f.bin' % (ep, score))
             torch.save(model_to_save.state_dict(), output_model_file)
@@ -1037,7 +1054,7 @@ def main():
         print("mean")
         for result in mean_results:
             print(result)
-        print("var0-var1")
+        print("var")
         for result in var_results:
             print(result)
 
