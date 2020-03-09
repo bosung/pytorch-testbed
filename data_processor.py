@@ -670,33 +670,33 @@ class CIFAR10Processor(DataProcessor):
         self.adjust_dataset()
 
     def adjust_dataset(self):
-        n_labels = 10
-        dataset, labels = [[] for _ in range(10)], [[] for _ in range(10)]
+        n_class = 10
+        dataset, labels = [[] for _ in range(n_class)], [[] for _ in range(n_class)]
         for e in self.trainset:
             vector, label = e
             _class = int(label)
-            if _class in [0, 1, 2, 3, 4]:
-                dataset[_class].append(vector.tolist())
-                labels[_class].append(_class)
+            # if _class in [0, 1, 2, 3]:
+            dataset[_class].append(vector.tolist())
+            labels[_class].append(_class)
         dev_size = 500
-        for i in range(n_labels):
-            if i == 4:  # set major class
+        for i in range(n_class):
+            if i == 0:  # set major class
                 self.train_features += dataset[i][dev_size:]
                 self.train_labels += labels[i][dev_size:]
                 self.dev_features += dataset[i][:dev_size]
                 self.dev_labels += labels[i][:dev_size]
             else:
-                # self.train_features += dataset[i][dev_size:dev_size+900]
-                # self.train_labels += labels[i][dev_size:dev_size+900]
-                self.train_features += dataset[i][dev_size:]
-                self.train_labels += labels[i][dev_size:]
+                self.train_features += dataset[i][dev_size:dev_size+900]
+                self.train_labels += labels[i][dev_size:dev_size+900]
+                # self.train_features += dataset[i][dev_size:]
+                # self.train_labels += labels[i][dev_size:]
                 self.dev_features += dataset[i][:dev_size]
                 self.dev_labels += labels[i][:dev_size]
 
-        # assert len(self.dev_features) == 5000
-        assert len(self.dev_features) == 2500
+        assert len(self.dev_features) == 5000
         # assert len(self.train_features) == 8550
-        assert len(self.train_features) == 22500
+        assert len(self.train_features) == 12600
+        # assert len(self.train_features) == 5850
 
     def get_train_examples(self, data_dir):
         print("[CIFAR-10] (train) filtered data: %d" % len(self.train_features))
@@ -711,15 +711,76 @@ class CIFAR10Processor(DataProcessor):
         features, labels = [], []
         for e in self.testset:
             vector, label = e
-            if label == 3:
-                features.append(vector.tolist())
-                labels.append(0)
-            elif label == 5:
-                features.append(vector.tolist())
-                labels.append(1)
+            _class = int(label)
+            features.append(vector.tolist())
+            labels.append(_class)
         print("[CIFAR-10] (test) filtered data: %d" % len(features))
         return features, labels
 
     def get_labels(self):
-        # return [i for i in range(10)]
-        return [i for i in range(5)]
+        return [i for i in range(10)]
+        # return [0, 1]
+
+
+class MNISTProcessor(DataProcessor):
+
+    def __init__(self):
+        self.transform = transforms.ToTensor()
+        self.trainset = torchvision.datasets.MNIST(root='./data', train=True,
+                                                     download=True, transform=self.transform)
+        self.testset = torchvision.datasets.MNIST(root='./data', train=False,
+                                                    download=True, transform=self.transform)
+        self.train_features = []
+        self.train_labels = []
+        self.dev_features = []
+        self.dev_labels = []
+        self.adjust_dataset()
+
+    def adjust_dataset(self):
+        n_class = 10
+        dataset, labels = [[] for _ in range(n_class)], [[] for _ in range(n_class)]
+        for e in self.trainset:
+            vector, label = e
+            _class = int(label)
+            # if _class in [0, 1, 2, 3]:
+            dataset[_class].append(vector.tolist())
+            labels[_class].append(_class)
+        dev_size = 600
+        for i in range(n_class):
+            if i == 0:  # set major class
+                self.train_features += dataset[i][dev_size:]
+                self.train_labels += labels[i][dev_size:]
+                self.dev_features += dataset[i][:dev_size]
+                self.dev_labels += labels[i][:dev_size]
+                print("[MNIST] major class 0 data: %d" % len(dataset[i][dev_size:]))
+            else:
+                self.train_features += dataset[i][dev_size:dev_size+540]
+                self.train_labels += labels[i][dev_size:dev_size+540]
+                # self.train_features += dataset[i][dev_size:]
+                # self.train_labels += labels[i][dev_size:]
+                self.dev_features += dataset[i][:dev_size]
+                self.dev_labels += labels[i][:dev_size]
+
+        assert len(self.dev_features) == 6000
+
+    def get_train_examples(self, data_dir):
+        print("[MNIST] (train) filtered data: %d" % len(self.train_features))
+        return self.train_features, self.train_labels
+
+    def get_dev_examples(self, data_dir):
+        print("[MNIST] (dev) filtered data: %d" % len(self.dev_features))
+        return self.dev_features, self.dev_labels
+
+    def get_test_examples(self, data_dir):
+        # test data
+        features, labels = [], []
+        for e in self.testset:
+            vector, label = e
+            _class = int(label)
+            features.append(vector.tolist())
+            labels.append(_class)
+        print("[MNIST] (test) filtered data: %d" % len(features))
+        return features, labels
+
+    def get_labels(self):
+        return [i for i in range(10)]
