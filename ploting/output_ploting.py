@@ -1,10 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.stats as stats
+# import scipy.stats as stats
 import math
 
 
-def sampling_ploting(t_prob, ep):
+def plot_samples(t_prob, ep):
     x = np.arange(0.0, 1.001, 0.001)
     y = np.zeros(1001)
     for p in t_prob:
@@ -24,7 +24,7 @@ def sampling_ploting(t_prob, ep):
     plt.savefig("ep-{}.png".format(str(ep)))
 
 
-def output_ploting(t_neg, t_pos, ep):
+def plot_out_dist(t_neg, t_pos, ep):
     x = np.arange(0.0, 1.001, 0.001)
     y_p = np.zeros(1001)
     y_n = np.zeros(1001)
@@ -51,5 +51,48 @@ def output_ploting(t_neg, t_pos, ep):
     plt.savefig("sep-ep-{}.png".format(str(ep)))
 
 
+def plot_vector_bar(v, u, class_names):
+    """ ref: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html """
+    fig, ax = plt.subplots()
+    # plt.imshow(v, interpolation='nearest', cmap=plt.cm.Blues)
+    # plt.title("title")
+    # plt.colorbar()
+
+    x = np.arange(len(class_names))
+    width = 0.35
+
+    # tick_marks = np.arange(len(class_names))
+    # plt.xticks(tick_marks, class_names, rotation=45)
+
+    v = np.around(v, decimals=2)
+    u = np.around(u, decimals=2)
+    rects = ax.bar(x - width/2, v, width, label='true')
+    rects2 = ax.bar(x + width/2, u, width, label='prediction')
+
+    def annotate(rects):
+        for i, rect in enumerate(rects):
+            height = rect.get_height()
+            plt.annotate(height,
+                         xy=(rect.get_x() + rect.get_width() / 2, height),
+                         ha='center', va='bottom')
+
+    annotate(rects)
+    annotate(rects2)
+
+    fig.tight_layout()
+    ax.set_xticks(x)
+    ax.set_xticklabels(class_names, rotation=40)
+    ax.legend()
+    # plt.ylabel(r'$p(y|x)$')
+    ax.set_ylabel(r'$p(y|x)$')
+    # plt.xlabel('class')
+    ax.set_xlabel('class')
+    # plt.show()
+    return fig
+
+
 if __name__ == "__main__":
-    sampling_ploting([0.1, 0.2, 0.3, 0.2, 0.2, 0.3, 0.4], 1)
+    # plot_samples([0.1, 0.2, 0.3, 0.2, 0.2, 0.3, 0.4], 1)
+    plot_vector_bar([0.1, 0.2, 0.3, 0.2, 0.2, 0.3, 0.4],
+                    [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+                    ["a", "b", "c", "d", "e", "f", "g"])
