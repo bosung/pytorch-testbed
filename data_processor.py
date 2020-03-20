@@ -686,17 +686,19 @@ class CIFAR10Processor(DataProcessor):
                 self.dev_features += dataset[i][:dev_size]
                 self.dev_labels += labels[i][:dev_size]
             else:
-                self.train_features += dataset[i][dev_size:dev_size+900]
-                self.train_labels += labels[i][dev_size:dev_size+900]
+                # self.train_features += dataset[i][dev_size:dev_size+900]
+                # self.train_labels += labels[i][dev_size:dev_size+900]
+                self.train_features += dataset[i][dev_size:dev_size + 450]
+                self.train_labels += labels[i][dev_size:dev_size + 450]
                 # self.train_features += dataset[i][dev_size:]
                 # self.train_labels += labels[i][dev_size:]
                 self.dev_features += dataset[i][:dev_size]
                 self.dev_labels += labels[i][:dev_size]
+            print("[CIFAR-10] dev class %d data: %d" % (i, len(dataset[i][:dev_size:])))
 
         assert len(self.dev_features) == 5000
-        # assert len(self.train_features) == 8550
-        assert len(self.train_features) == 12600
-        # assert len(self.train_features) == 5850
+        assert len(self.train_features) == 8550
+        # assert len(self.train_features) == 12600
 
     def get_train_examples(self, data_dir):
         print("[CIFAR-10] (train) filtered data: %d" % len(self.train_features))
@@ -720,6 +722,10 @@ class CIFAR10Processor(DataProcessor):
     def get_labels(self):
         return [i for i in range(10)]
         # return [0, 1]
+
+    def get_class_name(self):
+        return ["airplane", "automobile", "bird", "cat", "deer", "dog",
+                "frog", "horse", "ship", "truck"]
 
 
 class MNISTProcessor(DataProcessor):
@@ -756,10 +762,13 @@ class MNISTProcessor(DataProcessor):
             else:
                 self.train_features += dataset[i][dev_size:dev_size+540]
                 self.train_labels += labels[i][dev_size:dev_size+540]
+                # self.train_features += dataset[i][dev_size:dev_size + 1080]
+                # self.train_labels += labels[i][dev_size:dev_size + 1080]
                 # self.train_features += dataset[i][dev_size:]
                 # self.train_labels += labels[i][dev_size:]
                 self.dev_features += dataset[i][:dev_size]
                 self.dev_labels += labels[i][:dev_size]
+            print("[MNIST] dev class %d data: %d" % (i, len(dataset[i][:dev_size:])))
 
         assert len(self.dev_features) == 6000
 
@@ -780,6 +789,94 @@ class MNISTProcessor(DataProcessor):
             features.append(vector.tolist())
             labels.append(_class)
         print("[MNIST] (test) filtered data: %d" % len(features))
+        return features, labels
+
+    def get_labels(self):
+        return [i for i in range(10)]
+
+
+class SVHNProcessor(DataProcessor):
+
+    def __init__(self):
+        self.transform = transforms.ToTensor()
+        self.transform = transforms.Compose([transforms.ToTensor(),
+                                             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        self.trainset = torchvision.datasets.SVHN(root='./data/SVHN/', split='train',
+                                                     download=True, transform=self.transform)
+        self.testset = torchvision.datasets.SVHN(root='./data/SVHN/', split='test',
+                                                    download=True, transform=self.transform)
+        self.extraset = torchvision.datasets.SVHN(root='./data/SVHN', split='extra',
+                                                   download=True, transform=self.transform)
+        # self.whole_trainset = torch.utils.data.ConcatDataset([trainset, extraset])
+        self.train_features = []
+        self.train_labels = []
+        self.dev_features = []
+        self.dev_labels = []
+
+    def adjust_dataset(self):
+        n_class = 10
+        train_dataset, train_labels = [[] for _ in range(n_class)], [[] for _ in range(n_class)]
+        extra_dataset, extra_labels = [[] for _ in range(n_class)], [[] for _ in range(n_class)]
+        for e in self.trainset:
+            vector, label = e
+            _class = int(label)
+            # if _class in [0, 1, 2, 3]:
+            train_dataset[_class].append(vector.tolist())
+            train_labels[_class].append(_class)
+
+        for e in self.extraset:
+            vector, label = e
+            _class = int(label)
+            # if _class in [0, 1, 2, 3]:
+            extra_dataset[_class].append(vector.tolist())
+            extra_labels[_class].append(_class)
+
+        train_dev_size = 400
+        extra_dev_size = 200
+        for i in range(n_class):
+            print("[SVHN] major class %d data: %d" % (
+                i, len(train_dataset[i][train_dev_size:]) + len(extra_dataset[i][extra_dev_size:])))
+            if i == 0:  # set major class
+                self.dev_features += train_dataset[i][:train_dev_size]
+                self.dev_features += extra_dataset[i][:extra_dev_size]
+                self.dev_labels += train_labels[i][:train_dev_size]
+                self.dev_labels += extra_labels[i][:extra_dev_size]
+
+                self.train_features += train_dataset[i][train_dev_size:]
+                self.train_features += extra_dataset[i][extra_dev_size:]
+                self.train_labels += train_labels[i][train_dev_size:]
+                self.train_labels += extra_labels[i][extra_dev_size:]
+            else:
+                self.dev_features += train_dataset[i][:train_dev_size]
+                self.dev_features += extra_dataset[i][:extra_dev_size]
+                self.dev_labels += train_labels[i][:train_dev_size]
+                self.dev_labels += extra_labels[i][:extra_dev_size]
+
+                self.train_features += train_dataset[i][train_dev_size:]
+                self.train_features += extra_dataset[i][extra_dev_size:]
+                self.train_labels += train_labels[i][train_dev_size:]
+                self.train_labels += extra_labels[i][extra_dev_size:]
+
+        assert len(self.dev_features) == 6000
+        assert len(self.train_features) == 598388
+
+    def get_train_examples(self, data_dir):
+        print("[SVHN] (train) filtered data: %d" % len(self.train_features))
+        return self.train_features, self.train_labels
+
+    def get_dev_examples(self, data_dir):
+        print("[SVHN] (dev) filtered data: %d" % len(self.dev_features))
+        return self.dev_features, self.dev_labels
+
+    def get_test_examples(self, data_dir):
+        # test data
+        features, labels = [], []
+        for e in self.testset:
+            vector, label = e
+            _class = int(label)
+            features.append(vector.tolist())
+            labels.append(_class)
+        print("[SVHN] (test) filtered data: %d" % len(features))
         return features, labels
 
     def get_labels(self):
